@@ -112,7 +112,6 @@
   height: 36px;
   padding: 0 8px;
   z-index: 1;
-  text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -126,7 +125,6 @@
   padding: 0 8px;
   text-align: right;
   z-index: 1;
-  text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

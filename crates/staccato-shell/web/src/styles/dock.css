@@ -36,8 +36,7 @@
   isolation: isolate;
   transition:
     opacity 170ms var(--ease-shell),
-    transform 210ms var(--ease-shell),
-    filter 170ms var(--ease-shell);
+    transform 210ms var(--ease-shell);
 }
 
 .dock-shell.is-chrome-hidden {
@@ -46,7 +45,6 @@
 
 .dock-shell.is-chrome-hidden .shell-dock {
   opacity: 0;
-  filter: blur(2px);
   transform: translateY(18px) scale(0.96);
 }
 

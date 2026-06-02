@@ -30,6 +30,7 @@ impl WebShell {
             None,
             &applications,
             palette,
+            config.general.safe_mode,
             false,
         );
         let mut surfaces = WebSurfaces::new(actions_tx, &snapshot, &dock_apps)?;

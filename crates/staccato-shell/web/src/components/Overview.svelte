@@ -42,12 +42,14 @@
     sendAction({ type: "workspace-relative", offset: event.deltaY > 0 ? 1 : -1 });
   }
 
-  function scrollList(event: WheelEvent) {
-    const target = event.currentTarget as HTMLElement;
-    if (target.scrollHeight <= target.clientHeight) return;
+  function scrollOverviewList(event: WheelEvent) {
+    const node = event.currentTarget as HTMLElement;
+    const maxScroll = node.scrollHeight - node.clientHeight;
+    if (maxScroll <= 0) return;
+    const next = Math.max(0, Math.min(maxScroll, node.scrollTop + event.deltaY));
+    if (next === node.scrollTop) return;
     event.preventDefault();
-    event.stopPropagation();
-    target.scrollTop += event.deltaY;
+    node.scrollTop = next;
   }
 
   function newWorkspace() {
@@ -207,7 +209,9 @@
       <Icon name="search" />
       <span class="overview-search-text">
         <span class="overview-search-value" class:is-placeholder={!query}>{query || "Search"}</span>
-        <span class="overview-search-caret"></span>
+        {#if query}
+          <span class="overview-search-caret"></span>
+        {/if}
       </span>
     </div>
 
@@ -274,7 +278,7 @@
     {/each}
   </div>
 
-  <div class:overview-apps={!searching} class:overview-results={searching} onwheel={scrollList}>
+  <div class:overview-apps={!searching} class:overview-results={searching} onwheel={scrollOverviewList}>
     {#if searching && searchResults.length === 0}
       <div class="overview-empty">
         <Icon name="search" />

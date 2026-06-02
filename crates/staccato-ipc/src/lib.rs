@@ -145,6 +145,8 @@ pub enum ShellControlRequest {
 pub enum DefaultAppKind {
     Terminal,
     FileManager,
+    Browser,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

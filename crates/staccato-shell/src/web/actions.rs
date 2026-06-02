@@ -5,6 +5,9 @@ use staccato_layout::{ProfileId, WindowId, WorkspaceId};
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum WebShellAction {
     OpenLauncher,
+    LaunchDefaultApp {
+        app: staccato_ipc::DefaultAppKind,
+    },
     ToggleOverview,
     ToggleQuickSettings,
     ToggleDateCenter,
@@ -61,6 +64,9 @@ pub enum WebShellAction {
         percent: u8,
     },
     QuickToggleDebugOverlay,
+    SessionCommand {
+        command: SessionCommand,
+    },
     ReloadConfig,
     OpenLogsFolder,
     ToggleSafeMode,
@@ -75,6 +81,15 @@ pub enum WebShellAction {
         notification: u32,
         action: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionCommand {
+    Lock,
+    Suspend,
+    Reboot,
+    PowerOff,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

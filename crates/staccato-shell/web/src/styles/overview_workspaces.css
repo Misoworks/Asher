@@ -8,8 +8,17 @@
   margin-inline: auto;
   overflow-x: auto;
   overflow-y: visible;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   padding: 20px 22px 44px;
   scroll-snap-type: x proximity;
+}
+
+.overview-workspaces::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none;
+  background: transparent;
 }
 
 .workspace-preview {

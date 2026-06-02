@@ -7,15 +7,18 @@
   margin: clamp(8px, 1.5vh, 22px) auto 0;
   overflow: hidden auto;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   padding: 14px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
 .overview-results::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  width: 0 !important;
+  height: 0 !important;
   display: none;
+  background: transparent;
 }
 
 .overview-result {

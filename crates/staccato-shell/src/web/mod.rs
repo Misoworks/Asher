@@ -25,7 +25,9 @@ mod surface_layout;
 mod surface_sizing;
 mod sync;
 
-use actions::{QuickSettingsPage, WebShellAction, profile_id, window_id, workspace_id};
+use actions::{
+    QuickSettingsPage, SessionCommand, WebShellAction, profile_id, window_id, workspace_id,
+};
 use chrome_visibility::ChromeVisibility;
 use surface::WebSurfaces;
 
@@ -150,6 +152,7 @@ impl WebShell {
     fn handle_action(&mut self, action: WebShellAction) {
         match action {
             WebShellAction::OpenLauncher => self.open_launcher(),
+            WebShellAction::LaunchDefaultApp { app } => self.launch_default_app(app),
             WebShellAction::ToggleOverview => self.toggle_overview(),
             WebShellAction::ToggleQuickSettings => self.toggle_quick_settings(),
             WebShellAction::ToggleDateCenter => self.toggle_date_center(),
@@ -206,6 +209,7 @@ impl WebShell {
             WebShellAction::QuickToggleDebugOverlay => {
                 self.apply_model_result(set_debug_overlay(!self.model.debug_overlay))
             }
+            WebShellAction::SessionCommand { command } => self.run_session_command(command),
             WebShellAction::ReloadConfig => self.reload_config_from_command(),
             WebShellAction::OpenLogsFolder => self.open_logs_folder(),
             WebShellAction::ToggleSafeMode => self.toggle_safe_mode(),
@@ -275,10 +279,31 @@ impl WebShell {
             staccato_ipc::DefaultAppKind::FileManager => {
                 self.config.default_apps.file_manager.clone()
             }
+            staccato_ipc::DefaultAppKind::Browser => self.config.default_apps.browser.clone(),
+            staccato_ipc::DefaultAppKind::Settings => self.config.default_apps.settings.clone(),
         };
         self.hide_chrome();
         if !command.trim().is_empty() {
             self.launch(command);
+        }
+    }
+
+    fn run_session_command(&mut self, command: SessionCommand) {
+        let command = match command {
+            SessionCommand::Lock => {
+                "if command -v gtklock >/dev/null 2>&1; then exec gtklock; elif command -v swaylock >/dev/null 2>&1; then exec swaylock; elif command -v waylock >/dev/null 2>&1; then exec waylock; else exec loginctl lock-session; fi"
+            }
+            SessionCommand::Suspend => "systemctl suspend",
+            SessionCommand::Reboot => "systemctl reboot",
+            SessionCommand::PowerOff => "systemctl poweroff",
+        };
+        self.hide_chrome();
+        match spawn_command(command, self.model.xwayland_display.as_deref()) {
+            Ok(child) => {
+                debug!(pid = child.id(), command, "started session command");
+                self.app_processes.push(child);
+            }
+            Err(error) => warn!(%error, command, "failed to start session command"),
         }
     }
 

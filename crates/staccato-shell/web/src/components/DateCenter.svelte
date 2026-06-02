@@ -43,7 +43,7 @@
     calendarMonthOffset = 0;
   }
 
-  function calendarKeydown(event: KeyboardEvent) {
+  function calendarCurrentKeydown(event: KeyboardEvent) {
     if (event.key === "ArrowLeft" || event.key === "PageUp") {
       event.preventDefault();
       previousMonth();
@@ -166,15 +166,15 @@
           aria-label={snapshot.doNotDisturb ? "Disable do not disturb" : "Enable do not disturb"}
           onclick={toggleDoNotDisturb}
         >
-          <Icon name="shield" />
+          <Icon name={snapshot.doNotDisturb ? "bell-off" : "bell"} />
         </button>
       </div>
     </header>
 
     <div class="notifications" aria-live="polite">
       {#if groups.length === 0}
-        <div class="notification-empty">
-          <Icon name="bell" />
+        <div class="notification-empty" class:is-muted={snapshot.doNotDisturb}>
+          <Icon name={snapshot.doNotDisturb ? "bell-off" : "bell"} />
           <span>{snapshot.doNotDisturb ? "Do Not Disturb" : "No Notifications"}</span>
         </div>
       {:else}
@@ -276,7 +276,7 @@
     </div>
   </section>
 
-  <aside class="calendar" tabindex="0" aria-label="Calendar" onkeydown={calendarKeydown} onwheel={scrollMonth}>
+  <aside class="calendar" aria-label="Calendar" onwheel={scrollMonth}>
     <header class="calendar-header">
       <span>{todayLabel}</span>
       <strong>{todayFull}</strong>
@@ -287,7 +287,7 @@
         <button type="button" class="calendar-nav" aria-label="Previous month" onclick={previousMonth}>
           <Icon name="chevron-left" />
         </button>
-        <button type="button" class="calendar-current" onclick={resetMonth}>{monthLabel}</button>
+        <button type="button" class="calendar-current" onclick={resetMonth} onkeydown={calendarCurrentKeydown}>{monthLabel}</button>
         <button type="button" class="calendar-nav" aria-label="Next month" onclick={nextMonth}>
           <Icon name="chevron-right" />
         </button>

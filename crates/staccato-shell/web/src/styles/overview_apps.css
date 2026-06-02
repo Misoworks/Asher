@@ -9,6 +9,8 @@
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   padding: 36px 16px 36px;
   scroll-padding-top: 34px;
   scrollbar-width: none;
@@ -16,9 +18,10 @@
 }
 
 .overview-apps::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  width: 0 !important;
+  height: 0 !important;
   display: none;
+  background: transparent;
 }
 
 .overview-app {

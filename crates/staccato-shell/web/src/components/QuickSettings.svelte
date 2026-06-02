@@ -7,13 +7,15 @@
   import type { ShellSnapshot } from "../shell/model";
 
   let { snapshot }: { snapshot: ShellSnapshot } = $props();
+  let powerMenuOpen = $state(false);
   const showNetwork = $derived(Boolean(snapshot.status.network));
   const showPower = $derived(Boolean(snapshot.status.battery));
   const showVolume = $derived(Boolean(snapshot.status.audio));
   const showBrightness = $derived(Boolean(snapshot.status.brightness));
-  const tileCount = $derived(Number(showNetwork) + Number(showPower));
+  const tileCount = $derived(Number(showNetwork) + Number(showPower) + 1);
   const volume = $derived(snapshot.status.audio?.percent ?? 0);
   const brightness = $derived(snapshot.status.brightness?.percent ?? 0);
+  const notificationLabel = $derived(snapshot.notifications.length === 1 ? "1 notification" : `${snapshot.notifications.length} notifications`);
 
   function setVolume(percent: number) {
     sendAction({ type: "quick-set-volume", percent });
@@ -26,6 +28,15 @@
   function setBrightness(percent: number) {
     sendAction({ type: "quick-set-brightness", percent });
   }
+
+  function toggleDoNotDisturb() {
+    sendAction({ type: "notification-do-not-disturb", enabled: !snapshot.doNotDisturb });
+  }
+
+  function sessionCommand(command: "lock" | "suspend" | "reboot" | "power-off") {
+    powerMenuOpen = false;
+    sendAction({ type: "session-command", command });
+  }
 </script>
 
 <section class="popover quick-settings">
@@ -33,6 +44,26 @@
     <div>
       <span>Quick Settings</span>
       <small>{snapshot.activeProfile} / Workspace {snapshot.activeWorkspace}</small>
+    </div>
+    <div class="quick-header-actions">
+      <button
+        type="button"
+        class="round-action is-compact"
+        aria-label="Open system settings"
+        onclick={() => sendAction({ type: "launch-default-app", app: "settings" })}
+      >
+        <Icon name="settings" />
+      </button>
+      <button
+        type="button"
+        class="round-action is-compact"
+        class:is-active={powerMenuOpen}
+        aria-label={powerMenuOpen ? "Close power menu" : "Open power menu"}
+        aria-expanded={powerMenuOpen}
+        onclick={() => (powerMenuOpen = !powerMenuOpen)}
+      >
+        <Icon name="power" />
+      </button>
     </div>
   </header>
 
@@ -61,6 +92,18 @@
         <span class="setting-copy">Power<small>{batteryLabel(snapshot)}</small></span>
       </button>
     {/if}
+    <button
+      type="button"
+      class="setting-tile is-action"
+      class:is-primary={snapshot.doNotDisturb}
+      class:is-wide={tileCount === 1}
+      style="--index: 2"
+      aria-pressed={snapshot.doNotDisturb}
+      onclick={toggleDoNotDisturb}
+    >
+      <span class="setting-icon"><Icon name={snapshot.doNotDisturb ? "bell-off" : "bell"} /></span>
+      <span class="setting-copy">Do Not Disturb<small>{snapshot.doNotDisturb ? "On" : notificationLabel}</small></span>
+    </button>
   </div>
 
   <div class="quick-slider-stack">
@@ -80,6 +123,31 @@
     {/if}
   </div>
 
+  <div class="session-actions" class:is-open={powerMenuOpen} aria-label="Session controls" aria-hidden={!powerMenuOpen}>
+    <button type="button" class="session-action" style="--index: 0" tabindex={powerMenuOpen ? 0 : -1} onclick={() => sessionCommand("lock")}>
+      <span class="session-action-icon"><Icon name="lock" /></span>
+      <span>Lock</span>
+    </button>
+    <button type="button" class="session-action" style="--index: 1" tabindex={powerMenuOpen ? 0 : -1} onclick={() => sessionCommand("suspend")}>
+      <span class="session-action-icon"><Icon name="moon" /></span>
+      <span>Suspend</span>
+    </button>
+    <button type="button" class="session-action" style="--index: 2" tabindex={powerMenuOpen ? 0 : -1} onclick={() => sessionCommand("reboot")}>
+      <span class="session-action-icon"><Icon name="reboot" /></span>
+      <span>Restart</span>
+    </button>
+    <button
+      type="button"
+      class="session-action is-danger"
+      style="--index: 3"
+      tabindex={powerMenuOpen ? 0 : -1}
+      onclick={() => sessionCommand("power-off")}
+    >
+      <span class="session-action-icon"><Icon name="power" /></span>
+      <span>Power Off</span>
+    </button>
+  </div>
+
   <footer class="quick-footer">
     <button type="button" class="round-action" aria-label="Open launcher" onclick={() => sendAction({ type: "open-launcher" })}>
       <Icon name="search" />
@@ -87,8 +155,8 @@
     <button type="button" class="round-action" aria-label="Open overview" onclick={() => sendAction({ type: "toggle-overview" })}>
       <Icon name="app" />
     </button>
-    <button type="button" class="round-action" aria-label="Open settings" onclick={() => sendAction({ type: "quick-open-settings", page: "power" })}>
-      <Icon name="settings" />
+    <button type="button" class="round-action" aria-label="Open notifications" onclick={() => sendAction({ type: "toggle-date-center" })}>
+      <Icon name="calendar" />
     </button>
   </footer>
 

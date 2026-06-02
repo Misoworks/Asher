@@ -7,7 +7,20 @@
   let { snapshot }: { snapshot: ShellSnapshot } = $props();
   const item = $derived(snapshot.toastNotifications[0]);
 
-  function openCenter() {
+  function notificationDefaultAction(notification: NotificationItem) {
+    return notification.actions.find((action) => action.key === "default")?.key;
+  }
+
+  function visibleNotificationActions(notification: NotificationItem) {
+    return notification.actions.filter((action) => action.key !== "default").slice(0, 2);
+  }
+
+  function activate(notification: NotificationItem) {
+    const action = notificationDefaultAction(notification);
+    if (action) {
+      sendAction({ type: "notification-action", notification: notification.id, action });
+      return;
+    }
     sendAction({ type: "toggle-date-center" });
   }
 
@@ -24,7 +37,13 @@
 
 {#if item}
   <section class={`notification-toast is-${item.urgency}`}>
-    <button type="button" class="toast-open" onclick={openCenter}>
+    <button
+      type="button"
+      class="toast-open"
+      class:is-actionable={Boolean(notificationDefaultAction(item))}
+      aria-label={notificationDefaultAction(item) ? `Open ${item.summary || item.appName || "notification"}` : "Open notification center"}
+      onclick={() => activate(item)}
+    >
       <span class="toast-avatar">
         {#if item.iconUri}
           <img src={item.iconUri} alt="" />
@@ -49,9 +68,9 @@
       <Icon name="close" />
     </button>
 
-    {#if item.actions.length > 0}
+    {#if visibleNotificationActions(item).length > 0}
       <div class="toast-actions">
-        {#each item.actions.slice(0, 2) as action (action.key)}
+        {#each visibleNotificationActions(item) as action (action.key)}
           <button type="button" onclick={(event) => notificationAction(event, item, action.key)}>{action.label}</button>
         {/each}
       </div>

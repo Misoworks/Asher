@@ -25,6 +25,7 @@ pub struct WebShellSnapshot {
     pub active_mode: String,
     pub blur_enabled: bool,
     pub debug_overlay: bool,
+    pub safe_mode: bool,
     pub chrome_hidden: bool,
     pub palette: WebPalette,
     pub profiles: Vec<WebProfile>,
@@ -215,6 +216,7 @@ impl WebShellSnapshot {
         dock_menu_command: Option<&str>,
         applications: &[AppEntry],
         palette: ShellPalette,
+        safe_mode: bool,
         chrome_hidden: bool,
     ) -> Self {
         let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
@@ -233,6 +235,7 @@ impl WebShellSnapshot {
             active_mode: mode_name(model.active_mode),
             blur_enabled: model.blur_enabled,
             debug_overlay: model.debug_overlay,
+            safe_mode,
             chrome_hidden,
             palette: WebPalette::from(palette),
             profiles: model

@@ -17,6 +17,7 @@ export type ShellSnapshot = {
   activeMode: string;
   blurEnabled: boolean;
   debugOverlay: boolean;
+  safeMode: boolean;
   chromeHidden: boolean;
   palette: ShellPalette;
   profiles: ProfileItem[];
@@ -116,6 +117,7 @@ export type NotificationItem = {
 
 export type ShellAction =
   | { type: "open-launcher" }
+  | { type: "launch-default-app"; app: "terminal" | "file-manager" | "browser" | "settings" }
   | { type: "toggle-overview" }
   | { type: "toggle-quick-settings" }
   | { type: "toggle-date-center" }
@@ -139,6 +141,7 @@ export type ShellAction =
   | { type: "quick-toggle-mute" }
   | { type: "quick-set-brightness"; percent: number }
   | { type: "quick-toggle-debug-overlay" }
+  | { type: "session-command"; command: "lock" | "suspend" | "reboot" | "power-off" }
   | { type: "reload-config" }
   | { type: "open-logs-folder" }
   | { type: "toggle-safe-mode" }
@@ -161,6 +164,7 @@ export const emptySnapshot = (): ShellSnapshot => {
     activeMode: "panel",
     blurEnabled: true,
     debugOverlay: false,
+    safeMode: false,
     chromeHidden: false,
     palette: {
       panel: "rgba(22, 22, 20, 0.62)",

@@ -113,6 +113,7 @@ impl WebShell {
             self.dock_menu_command.as_deref(),
             &self.applications,
             self.palette,
+            self.config.general.safe_mode,
             self.overview_visible,
         );
         let Ok(json) = serde_json::to_string(&snapshot) else {

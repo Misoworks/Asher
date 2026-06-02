@@ -117,6 +117,11 @@ impl NotificationService {
 
     pub fn set_do_not_disturb(&mut self, enabled: bool) {
         self.snapshot.do_not_disturb = enabled;
+        if enabled {
+            self.snapshot
+                .toast_items
+                .retain(|item| item.urgency == NotificationUrgency::Critical);
+        }
         let _ = self
             .commands
             .send(NotificationCommand::SetDoNotDisturb(enabled));
@@ -249,11 +254,6 @@ impl NotificationShared {
             id
         };
         let urgency = urgency_from_hints(&hints);
-        if state.do_not_disturb && urgency != NotificationUrgency::Critical {
-            remove_stored(&mut state.items, id);
-            let _ = self.changed.send(());
-            return id;
-        }
         let item = NotificationItem {
             id,
             app_name: clean_app_name(&app_name),
@@ -264,10 +264,11 @@ impl NotificationShared {
             urgency,
             actions: action_pairs(actions),
         };
+        let toast_visible = !state.do_not_disturb || urgency == NotificationUrgency::Critical;
         let stored = StoredNotification {
             item,
             toast_until: expiration_for(expire_timeout, urgency),
-            toast_visible: true,
+            toast_visible,
         };
 
         if let Some(existing) = state
@@ -410,6 +411,13 @@ fn handle_command(
             {
                 let mut state = shared.state.lock().expect("notification state poisoned");
                 state.do_not_disturb = enabled;
+                if enabled {
+                    for notification in &mut state.items {
+                        if notification.item.urgency != NotificationUrgency::Critical {
+                            notification.toast_visible = false;
+                        }
+                    }
+                }
             }
             true
         }
@@ -421,15 +429,6 @@ fn handle_command(
             }
             false
         }
-    }
-}
-
-fn remove_stored(items: &mut Vec<StoredNotification>, id: u32) {
-    if let Some(index) = items
-        .iter()
-        .position(|notification| notification.item.id == id)
-    {
-        items.remove(index);
     }
 }
 
