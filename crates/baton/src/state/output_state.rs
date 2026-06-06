@@ -7,6 +7,18 @@ use smithay::{
 use staccato_layout::Rect;
 
 impl BatonState {
+    #[cfg(feature = "session-backend")]
+    pub fn set_output_descriptor(&mut self, descriptor: crate::output::OutputDescriptor) {
+        self.output_size = descriptor.size;
+        self.output_refresh_millihertz = descriptor.refresh_millihertz;
+        configure_output(&self.output, descriptor.size, descriptor.refresh_millihertz);
+        self.layout
+            .set_bounds(Rect::new(0, 0, descriptor.size.w, descriptor.size.h));
+        layers::arrange(&self.output);
+        self.apply_active_arrangement();
+        self.mark_scene_dirty();
+    }
+
     pub fn set_output_size(&mut self, size: Size<i32, Physical>) {
         self.output_size = size;
         configure_output(&self.output, size, self.output_refresh_millihertz);

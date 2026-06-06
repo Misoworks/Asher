@@ -1,25 +1,30 @@
-use super::DrmError;
+use super::{DrmError, scanout::DirectScanout};
 use crate::output::OutputDescriptor;
 use smithay::{
     backend::{
         allocator::{
-            Fourcc,
+            Format, Fourcc,
             dmabuf::Dmabuf,
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
         drm::{
             DrmDevice, DrmDeviceFd, DrmDeviceNotifier, GbmBufferedSurface, GbmBufferedSurfaceError,
+            exporter::gbm::GbmFramebufferExporter,
         },
         egl::{EGLContext, EGLDisplay},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{Bind, gles::GlesRenderer},
         session::{Session, libseat::LibSeatSession, libseat::LibSeatSessionNotifier},
-        udev::{UdevBackend, primary_gpu},
+        udev::{UdevBackend, UdevEvent, primary_gpu},
     },
     reexports::{
-        drm::control::{Device as ControlDevice, Mode, ResourceHandles, connector, crtc},
+        drm::{
+            control::{Device as ControlDevice, Mode, ResourceHandles, connector, crtc},
+            node::DrmNode,
+        },
         input::Libinput,
         rustix::fs::OFlags,
+        rustix::fs::stat,
         wayland_server::DisplayHandle,
     },
     utils::{DeviceFd, Physical, Raw, Size},
@@ -28,18 +33,33 @@ use tracing::{debug, info};
 
 pub type SessionSurface = GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, ()>;
 
-pub struct SessionDevice {
-    pub session: LibSeatSession,
-    pub session_notifier: LibSeatSessionNotifier,
-    pub drm: DrmDevice,
-    pub drm_notifier: DrmDeviceNotifier,
-    pub surface: SessionSurface,
-    pub renderer: GlesRenderer,
-    pub input: LibinputInputBackend,
-    pub descriptor: OutputDescriptor,
+pub struct OpenedSessionDevice {
+    pub device: SessionDevice,
+    pub sources: SessionSources,
 }
 
-pub fn open(_display: &DisplayHandle) -> Result<SessionDevice, DrmError> {
+pub struct SessionSources {
+    pub session_notifier: LibSeatSessionNotifier,
+    pub udev: UdevBackend,
+    pub drm_notifier: DrmDeviceNotifier,
+    pub input: LibinputInputBackend,
+}
+
+pub struct SessionDevice {
+    _session: LibSeatSession,
+    pub active_device_id: u64,
+    pub drm: DrmDevice,
+    pub surface: SessionSurface,
+    pub direct_scanout: DirectScanout,
+    submitted_frame: Option<SubmittedFrame>,
+    gbm: GbmDevice<DrmDeviceFd>,
+    renderer_formats: Vec<Format>,
+    pub renderer: GlesRenderer,
+    pub descriptor: OutputDescriptor,
+    output: ConnectedOutput,
+}
+
+pub fn open(_display: &DisplayHandle) -> Result<OpenedSessionDevice, DrmError> {
     let (mut session, session_notifier) = LibSeatSession::new().map_err(|error| {
         DrmError::Unsupported(format!("failed to open libseat session: {error}"))
     })?;
@@ -68,6 +88,14 @@ pub fn open(_display: &DisplayHandle) -> Result<SessionDevice, DrmError> {
                 path.display()
             ))
         })?;
+    let active_device_id = stat(&path)
+        .map_err(|error| {
+            DrmError::Unsupported(format!(
+                "failed to read DRM device id for {}: {error}",
+                path.display()
+            ))
+        })?
+        .st_rdev as u64;
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let (mut drm, drm_notifier) = DrmDevice::new(drm_fd.clone(), true).map_err(|error| {
         DrmError::Unsupported(format!(
@@ -86,21 +114,15 @@ pub fn open(_display: &DisplayHandle) -> Result<SessionDevice, DrmError> {
     let renderer = unsafe { GlesRenderer::new(context) }.map_err(|error| {
         DrmError::Unsupported(format!("failed to create GLES renderer: {error}"))
     })?;
-    let drm_surface = drm
-        .create_surface(output.crtc, output.mode, &[output.connector])
-        .map_err(|error| DrmError::Unsupported(format!("failed to create DRM surface: {error}")))?;
     let renderer_formats = <GlesRenderer as Bind<Dmabuf>>::supported_formats(&renderer)
         .ok_or_else(|| {
             DrmError::Unsupported("GLES renderer exposes no GBM render formats".to_string())
-        })?;
-    let allocator = GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT);
-    let surface = SessionSurface::new(
-        drm_surface,
-        allocator,
-        &[Fourcc::Argb8888, Fourcc::Xrgb8888],
-        renderer_formats,
-    )
-    .map_err(surface_error)?;
+        })?
+        .into_iter()
+        .collect::<Vec<_>>();
+    let surface = create_surface(&mut drm, gbm.clone(), renderer_formats.clone(), &output)?;
+    let import_node = DrmNode::from_file(&drm_fd).ok();
+    let direct_scanout = DirectScanout::new(GbmFramebufferExporter::new(gbm.clone(), import_node));
 
     let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
     libinput
@@ -117,23 +139,121 @@ pub fn open(_display: &DisplayHandle) -> Result<SessionDevice, DrmError> {
         "opened DRM session device"
     );
 
-    Ok(SessionDevice {
-        session,
-        session_notifier,
-        drm,
-        drm_notifier,
-        surface,
-        renderer,
-        input,
-        descriptor: output.descriptor,
+    Ok(OpenedSessionDevice {
+        device: SessionDevice {
+            _session: session,
+            active_device_id,
+            drm,
+            surface,
+            direct_scanout,
+            submitted_frame: None,
+            gbm,
+            renderer_formats,
+            renderer,
+            descriptor: output.descriptor.clone(),
+            output,
+        },
+        sources: SessionSources {
+            session_notifier,
+            udev,
+            drm_notifier,
+            input,
+        },
     })
+}
+
+impl SessionDevice {
+    pub fn rescan_primary_output(&mut self) -> Result<bool, DrmError> {
+        let output = ConnectedOutput::discover(&self.drm)?;
+        if self.output.matches(&output) {
+            return Ok(false);
+        }
+
+        self.surface.surface().reset_state().map_err(|error| {
+            DrmError::Unsupported(format!("failed to reset old DRM surface: {error}"))
+        })?;
+        self.surface = create_surface(
+            &mut self.drm,
+            self.gbm.clone(),
+            self.renderer_formats.clone(),
+            &output,
+        )?;
+        self.surface.reset_buffer_ages();
+        self.discard_pending_frame();
+        self.descriptor = output.descriptor.clone();
+        self.output = output;
+        Ok(true)
+    }
+
+    pub fn handles_udev_event(&self, event: &UdevEvent) -> bool {
+        match event {
+            UdevEvent::Changed { device_id } | UdevEvent::Removed { device_id } => {
+                *device_id as u64 == self.active_device_id
+            }
+            UdevEvent::Added { .. } => false,
+        }
+    }
+
+    pub fn mark_frame_submitted(&mut self, frame: SubmittedFrame) {
+        self.submitted_frame = Some(frame);
+    }
+
+    pub fn direct_scanout_pending(&self) -> bool {
+        self.direct_scanout.has_pending_frame()
+    }
+
+    pub fn discard_pending_frame(&mut self) {
+        self.direct_scanout.frame_submitted();
+        self.submitted_frame = None;
+    }
+
+    pub fn frame_submitted(&mut self) -> Result<(), DrmError> {
+        match self.submitted_frame.take() {
+            Some(SubmittedFrame::Direct) => {
+                self.direct_scanout.frame_submitted();
+                Ok(())
+            }
+            Some(SubmittedFrame::Composited) | None => {
+                let _ = self.surface.frame_submitted().map_err(|error| {
+                    DrmError::Unsupported(format!("failed to retire submitted DRM frame: {error}"))
+                })?;
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmittedFrame {
+    Composited,
+    Direct,
+}
+
+fn create_surface(
+    drm: &mut DrmDevice,
+    gbm: GbmDevice<DrmDeviceFd>,
+    renderer_formats: Vec<Format>,
+    output: &ConnectedOutput,
+) -> Result<SessionSurface, DrmError> {
+    let drm_surface = drm
+        .create_surface(output.crtc, output.mode, &[output.connector])
+        .map_err(|error| DrmError::Unsupported(format!("failed to create DRM surface: {error}")))?;
+    let allocator = GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT);
+    SessionSurface::new(
+        drm_surface,
+        allocator,
+        &[Fourcc::Argb8888, Fourcc::Xrgb8888],
+        renderer_formats,
+    )
+    .map_err(surface_error)
 }
 
 fn surface_error(error: GbmBufferedSurfaceError<std::io::Error>) -> DrmError {
     DrmError::Unsupported(format!("failed to create GBM scanout surface: {error}"))
 }
 
-struct ConnectedOutput {
+#[derive(Clone)]
+pub struct ConnectedOutput {
     descriptor: OutputDescriptor,
     connector: connector::Handle,
     mode: Mode,
@@ -141,6 +261,10 @@ struct ConnectedOutput {
 }
 
 impl ConnectedOutput {
+    fn matches(&self, other: &Self) -> bool {
+        self.connector == other.connector && self.crtc == other.crtc && self.mode == other.mode
+    }
+
     fn discover(device: &DrmDevice) -> Result<Self, DrmError> {
         let resources = device.resource_handles().map_err(|error| {
             DrmError::Unsupported(format!("failed to read DRM resources: {error}"))

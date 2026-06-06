@@ -20,7 +20,7 @@ The real DRM/KMS session backend is built behind an explicit feature while it is
 cargo build -p baton --features session-backend
 ```
 
-That feature requires libseat development files. On Arch-based systems install `seatd`; on Debian/Ubuntu-style systems install `libseat-dev`. For a complete login session, install `dbus-run-session`, `dbus-update-activation-environment`, and a Secret Service provider such as `gnome-keyring-daemon`.
+That feature requires libseat development files. On Fedora install `libseat-devel`, `systemd-devel`, `mesa-libgbm-devel`, `mesa-libEGL-devel`, `mesa-libGLES-devel`, `libxkbcommon-devel`, `libudev-devel`, `libinput-devel`, `xwayland-satellite`, `xorg-x11-server-Xwayland`, `xdg-desktop-portal`, `xdg-desktop-portal-gtk`, `xdg-desktop-portal-gnome`, `gnome-keyring`, and a PolicyKit agent such as `lxpolkit` or `xfce-polkit`. On Arch-based systems install `seatd`; on Debian/Ubuntu-style systems install `libseat-dev`. For a complete login session, install `dbus-run-session`, `dbus-update-activation-environment`, a Secret Service provider such as `gnome-keyring-daemon`, and a PolicyKit authentication agent.
 
 Build the web shell assets with Bun before compiling `staccato-shell` when the web UI has changed. The build emits a single HTML file that is embedded into the shell binary:
 
@@ -86,7 +86,7 @@ cargo run -p staccato-session -- --desktop-entry
 cargo run -p staccato-session -- --session --dry-run
 ```
 
-The DRM/KMS session backend behind `baton --features session-backend` opens the active seat through libseat, selects the primary DRM card with udev, modesets the first connected output, renders with GBM/EGL/GLES, forwards libinput keyboard/pointer events, starts the shell and XWayland satellite, and keeps the private D-Bus session behavior used by the nested launcher. The current hardware backend is a first real-session path for one GPU and one connected output; hotplug, multi-output layout, direct scanout, portal services, and a linux-dmabuf global are still follow-up work.
+The DRM/KMS session backend behind `baton --features session-backend` opens the active seat through libseat, selects the primary DRM card with udev, modesets the first connected output, renders with GBM/EGL/GLES, forwards libinput keyboard/pointer events, starts the shell and XWayland satellite, advertises linux-dmabuf formats accepted by the renderer, refreshes the active scanout when udev reports connector changes on the active DRM device, and keeps the private D-Bus session behavior used by the nested launcher. Fullscreen Wayland clients can be scanned out directly on the primary plane when there are no visible shell/effect layers and KMS accepts the client framebuffer; otherwise Baton falls back to normal composition. Install `data/xdg-desktop-portal/staccato-portals.conf` to `/usr/share/xdg-desktop-portal/staccato-portals.conf` or `/etc/xdg/xdg-desktop-portal/staccato-portals.conf` so the xdg-desktop-portal broker chooses Staccato's GTK/GNOME backend preferences. The current hardware backend is still single-GPU and single-active-output; full extended multi-output layout and overlay/cursor plane assignment are still follow-up work.
 
 Current compositor shortcuts:
 

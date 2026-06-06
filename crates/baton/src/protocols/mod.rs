@@ -5,11 +5,12 @@ use crate::{
     window::{ResizeEdge, surface_has_client_frame_extents},
 };
 use smithay::{
+    backend::allocator::Buffer,
     delegate_alpha_modifier, delegate_compositor, delegate_cursor_shape, delegate_data_device,
-    delegate_fractional_scale, delegate_layer_shell, delegate_output, delegate_presentation,
-    delegate_primary_selection, delegate_seat, delegate_shm, delegate_text_input_manager,
-    delegate_viewporter, delegate_xdg_activation, delegate_xdg_decoration, delegate_xdg_shell,
-    delegate_xdg_toplevel_icon,
+    delegate_dmabuf, delegate_fractional_scale, delegate_layer_shell, delegate_output,
+    delegate_presentation, delegate_primary_selection, delegate_seat, delegate_shm,
+    delegate_text_input_manager, delegate_viewporter, delegate_xdg_activation,
+    delegate_xdg_decoration, delegate_xdg_shell, delegate_xdg_toplevel_icon,
     input::{
         Seat, SeatHandler,
         pointer::{CursorIcon, CursorImageStatus},
@@ -26,6 +27,7 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{self, CompositorClientState, CompositorHandler, CompositorState},
+        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         fractional_scale::{self, FractionalScaleHandler},
         output::OutputHandler,
         selection::{
@@ -58,6 +60,25 @@ use tracing::debug;
 
 impl BufferHandler for BatonState {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
+}
+
+impl DmabufHandler for BatonState {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.protocol_state.dmabuf
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: ImportNotifier,
+    ) {
+        if self.dmabuf_formats.contains(&dmabuf.format()) {
+            let _ = notifier.successful::<Self>();
+        } else {
+            notifier.failed();
+        }
+    }
 }
 
 impl XdgShellHandler for BatonState {
@@ -462,6 +483,7 @@ delegate_text_input_manager!(BatonState);
 delegate_presentation!(BatonState);
 delegate_layer_shell!(BatonState);
 delegate_compositor!(BatonState);
+delegate_dmabuf!(BatonState);
 delegate_output!(BatonState);
 delegate_shm!(BatonState);
 delegate_seat!(BatonState);

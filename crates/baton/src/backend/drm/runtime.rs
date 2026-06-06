@@ -17,8 +17,8 @@ use crate::{
 };
 use smithay::{
     backend::{
-        drm::DrmEvent, input::InputEvent, libinput::LibinputInputBackend,
-        session::Event as SessionEvent,
+        drm::DrmEvent, input::InputEvent, libinput::LibinputInputBackend, renderer::ImportDma,
+        session::Event as SessionEvent, udev::UdevEvent,
     },
     reexports::{
         calloop::EventLoop,
@@ -37,18 +37,16 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         DrmError::Unsupported(format!("failed to create Wayland display: {error}"))
     })?;
     let dh = display.handle();
-    let device = device::open(&dh)?;
-    let SessionDevice {
-        session: _session,
+    let opened = device::open(&dh)?;
+    let mut device = opened.device;
+    let device::SessionSources {
         session_notifier,
-        mut drm,
+        udev,
         drm_notifier,
-        mut surface,
-        mut renderer,
         input,
-        descriptor,
-    } = device;
-    let mut state = BatonState::new_for_output(&dh, options.config, descriptor);
+    } = opened.sources;
+    let mut state = BatonState::new_for_output(&dh, options.config, device.descriptor.clone());
+    state.enable_dmabuf(device.renderer.dmabuf_formats());
     let ipc = IpcServer::bind()
         .map_err(|error| DrmError::Unsupported(format!("failed to bind IPC socket: {error}")))?;
     let shell_control_socket = shell_socket_path(ipc.path());
@@ -98,6 +96,12 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         })?;
     event_loop
         .handle()
+        .insert_source(udev, |event, _, data| data.udev.push(event))
+        .map_err(|error| {
+            DrmError::Unsupported(format!("failed to register udev source: {error}"))
+        })?;
+    event_loop
+        .handle()
         .insert_source(session_notifier, |event, _, data| data.session.push(event))
         .map_err(|error| {
             DrmError::Unsupported(format!("failed to register libseat source: {error}"))
@@ -137,19 +141,42 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             })?;
         handle_session_events(
             &mut loop_events,
-            &mut drm,
-            &mut surface,
+            &mut device,
             &mut active,
             &mut force_full_damage,
         )?;
+        for event in loop_events.udev.drain(..) {
+            if !device.handles_udev_event(&event) {
+                continue;
+            }
+            match event {
+                UdevEvent::Changed { .. } => {
+                    if device.rescan_primary_output()? {
+                        state.set_output_descriptor(device.descriptor.clone());
+                        frame_renderer.reset_for_output(&state);
+                        force_full_damage = true;
+                        info!(
+                            output = %device.descriptor.name,
+                            width = device.descriptor.size.w,
+                            height = device.descriptor.size.h,
+                            "DRM primary output changed"
+                        );
+                    }
+                }
+                UdevEvent::Removed { .. } => {
+                    return Err(DrmError::Unsupported(
+                        "active DRM device was removed".to_string(),
+                    ));
+                }
+                UdevEvent::Added { .. } => {}
+            }
+        }
         for error in loop_events.drm_errors.drain(..) {
             warn!(%error, "DRM event error");
         }
         for crtc in loop_events.vblank.drain(..) {
-            if crtc == surface.crtc() {
-                let _ = surface.frame_submitted().map_err(|error| {
-                    DrmError::Unsupported(format!("failed to retire submitted DRM frame: {error}"))
-                })?;
+            if crtc == device.surface.crtc() {
+                device.frame_submitted()?;
             }
         }
         for event in loop_events.input.drain(..) {
@@ -201,14 +228,19 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             .flush_clients()
             .map_err(|error| DrmError::Unsupported(format!("Wayland flush failed: {error}")))?;
 
-        if active {
+        if active && !device.direct_scanout_pending() {
             match frame_renderer.render(
                 &mut state,
-                &mut renderer,
-                &mut surface,
+                &mut device.renderer,
+                &mut device.surface,
+                &mut device.direct_scanout,
                 force_full_damage,
             )? {
-                FrameResult::Queued { frame_time } => {
+                FrameResult::Queued {
+                    frame_time,
+                    submitted,
+                } => {
+                    device.mark_frame_submitted(submitted);
                     force_full_damage = false;
                     for surface in state
                         .windows
@@ -230,6 +262,14 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
                         })?;
                 }
             }
+        } else if active {
+            event_loop
+                .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
+                .map_err(|error| {
+                    DrmError::Unsupported(format!(
+                        "session direct-scanout dispatch failed: {error}"
+                    ))
+                })?;
         } else {
             event_loop
                 .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
@@ -246,12 +286,12 @@ struct LoopEvents {
     vblank: Vec<crtc::Handle>,
     drm_errors: Vec<String>,
     session: Vec<SessionEvent>,
+    udev: Vec<UdevEvent>,
 }
 
 fn handle_session_events(
     events: &mut LoopEvents,
-    drm: &mut smithay::backend::drm::DrmDevice,
-    surface: &mut super::device::SessionSurface,
+    device: &mut SessionDevice,
     active: &mut bool,
     force_full_damage: &mut bool,
 ) -> Result<(), DrmError> {
@@ -259,17 +299,19 @@ fn handle_session_events(
         match event {
             SessionEvent::PauseSession => {
                 *active = false;
-                drm.pause();
+                device.discard_pending_frame();
+                device.drm.pause();
                 info!("paused DRM session");
             }
             SessionEvent::ActivateSession => {
-                drm.activate(true).map_err(|error| {
+                device.drm.activate(true).map_err(|error| {
                     DrmError::Unsupported(format!("failed to reactivate DRM device: {error}"))
                 })?;
-                surface.surface().reset_state().map_err(|error| {
+                device.surface.surface().reset_state().map_err(|error| {
                     DrmError::Unsupported(format!("failed to reset DRM surface: {error}"))
                 })?;
-                surface.reset_buffer_ages();
+                device.surface.reset_buffer_ages();
+                device.discard_pending_frame();
                 *active = true;
                 *force_full_damage = true;
                 info!("reactivated DRM session");

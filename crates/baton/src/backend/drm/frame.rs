@@ -1,4 +1,8 @@
-use super::{DrmError, device::SessionSurface};
+use super::{
+    DrmError,
+    device::{SessionSurface, SubmittedFrame},
+    scanout::DirectScanout,
+};
 use crate::{
     background::Background,
     background_effect,
@@ -22,7 +26,10 @@ use std::time::{Duration, Instant};
 
 pub enum FrameResult {
     Idle,
-    Queued { frame_time: FrameTime },
+    Queued {
+        frame_time: FrameTime,
+        submitted: SubmittedFrame,
+    },
 }
 
 pub struct SessionFrameRenderer {
@@ -39,6 +46,7 @@ pub struct SessionFrameRenderer {
     fps_frames: u32,
     fps_started: Instant,
     shell_layers_seen_ready: bool,
+    previous_frame_direct: bool,
 }
 
 impl SessionFrameRenderer {
@@ -57,6 +65,7 @@ impl SessionFrameRenderer {
             fps_frames: 0,
             fps_started: Instant::now(),
             shell_layers_seen_ready: false,
+            previous_frame_direct: false,
         }
     }
 
@@ -65,6 +74,7 @@ impl SessionFrameRenderer {
         state: &mut BatonState,
         renderer: &mut GlesRenderer,
         surface: &mut SessionSurface,
+        direct_scanout: &mut DirectScanout,
         force_full_damage: bool,
     ) -> Result<FrameResult, DrmError> {
         let frame_started = Instant::now();
@@ -84,6 +94,7 @@ impl SessionFrameRenderer {
             state.config.compositor.debug_overlay && self.debug_overlay_cache.needs_refresh();
         let blur_animating = self.blur_cache.is_animating();
         let content_render_needed = force_full_damage
+            || self.previous_frame_direct
             || scene_dirty
             || removed_windows
             || finished_window_closes
@@ -99,13 +110,6 @@ impl SessionFrameRenderer {
             self.previous_frame_ms = 0.0;
             return Ok(FrameResult::Idle);
         }
-
-        let (mut dmabuf, buffer_age) = surface.next_buffer().map_err(|error| {
-            DrmError::Unsupported(format!("failed to acquire GBM buffer: {error}"))
-        })?;
-        let mut framebuffer = renderer.bind(&mut dmabuf).map_err(|error| {
-            DrmError::Unsupported(format!("failed to bind GBM buffer: {error}"))
-        })?;
 
         let fullscreen_active = state
             .windows
@@ -172,6 +176,36 @@ impl SessionFrameRenderer {
         } else {
             None
         };
+        if can_direct_scanout(
+            state,
+            fullscreen_active,
+            show_loading,
+            debug_needs_render,
+            blur_animating,
+            &background_layer,
+            &bottom_layer,
+            &top_layer,
+            &overlay_layer,
+            &window_effect_targets,
+        ) && direct_scanout.try_queue(state, renderer, surface)?
+        {
+            self.previous_damage_area = state.output_size.w.saturating_mul(state.output_size.h);
+            self.previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
+            self.fps_frames += 1;
+            self.previous_frame_direct = true;
+            self.update_fps();
+            return Ok(FrameResult::Queued {
+                frame_time: self.frame_clock.next_frame(),
+                submitted: SubmittedFrame::Direct,
+            });
+        }
+
+        let (mut dmabuf, buffer_age) = surface.next_buffer().map_err(|error| {
+            DrmError::Unsupported(format!("failed to acquire GBM buffer: {error}"))
+        })?;
+        let mut framebuffer = renderer.bind(&mut dmabuf).map_err(|error| {
+            DrmError::Unsupported(format!("failed to bind GBM buffer: {error}"))
+        })?;
         let debug_overlay = self.debug_overlay(state, renderer, content_render_needed)?;
         let damage_plan = {
             let damage_elements = damage_elements(
@@ -188,7 +222,7 @@ impl SessionFrameRenderer {
             self.damage_tracker.plan(
                 state.output_size,
                 usize::from(buffer_age),
-                force_full_damage || blur_animating,
+                force_full_damage || blur_animating || self.previous_frame_direct,
                 &damage_elements,
             )
         };
@@ -202,7 +236,7 @@ impl SessionFrameRenderer {
             self.blur_damage_tracker.plan(
                 state.output_size,
                 usize::from(buffer_age),
-                force_full_damage || blur_animating,
+                force_full_damage || blur_animating || self.previous_frame_direct,
                 &blur_damage_elements,
             )
         };
@@ -247,9 +281,11 @@ impl SessionFrameRenderer {
             self.blur_damage_tracker.record(blur_damage_plan);
             self.fps_frames += 1;
             self.previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
+            self.previous_frame_direct = false;
             self.update_fps();
             return Ok(FrameResult::Queued {
                 frame_time: self.frame_clock.next_frame(),
+                submitted: SubmittedFrame::Composited,
             });
         }
 
@@ -258,6 +294,18 @@ impl SessionFrameRenderer {
 
     pub fn mark_shell_not_ready(&mut self) {
         self.shell_layers_seen_ready = false;
+    }
+
+    pub fn reset_for_output(&mut self, state: &BatonState) {
+        let frame_interval = refresh_interval(state.output_refresh_millihertz);
+        self.frame_clock.set_refresh(frame_interval);
+        self.damage_tracker = DamageTracker::new(state.output_size);
+        self.blur_damage_tracker = DamageTracker::new(state.output_size);
+        self.blur_cache.clear();
+        self.debug_overlay_cache.clear();
+        self.previous_damage_area = 0;
+        self.previous_frame_ms = 0.0;
+        self.previous_frame_direct = false;
     }
 
     fn debug_overlay(
@@ -323,4 +371,46 @@ fn loading_phase(elapsed: Duration) -> f32 {
 
 fn render_error(error: impl std::fmt::Display) -> DrmError {
     DrmError::Unsupported(format!("failed to render DRM frame: {error}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn can_direct_scanout(
+    state: &BatonState,
+    fullscreen_active: bool,
+    show_loading: bool,
+    debug_needs_render: bool,
+    blur_animating: bool,
+    background_layer: &[smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+        GlesRenderer,
+    >],
+    bottom_layer: &[smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+        GlesRenderer,
+    >],
+    top_layer: &[smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+        GlesRenderer,
+    >],
+    overlay_layer: &[smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+        GlesRenderer,
+    >],
+    window_effect_targets: &[layers::LayerRenderTarget],
+) -> bool {
+    fullscreen_active
+        && !show_loading
+        && !debug_needs_render
+        && !blur_animating
+        && !state.animations_active()
+        && state.workspace_transition().is_none()
+        && background_layer.is_empty()
+        && bottom_layer.is_empty()
+        && top_layer.is_empty()
+        && overlay_layer.is_empty()
+        && window_effect_targets.is_empty()
+}
+
+fn refresh_interval(refresh_millihertz: i32) -> Duration {
+    let refresh = u64::try_from(refresh_millihertz)
+        .ok()
+        .filter(|refresh| *refresh > 0)
+        .unwrap_or(crate::output::DEFAULT_REFRESH_MILLIHERTZ as u64);
+    Duration::from_nanos((1_000_000_000_000u64 + refresh / 2) / refresh)
 }

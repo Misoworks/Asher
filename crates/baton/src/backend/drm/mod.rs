@@ -4,6 +4,8 @@ mod device;
 mod frame;
 #[cfg(feature = "session-backend")]
 mod runtime;
+#[cfg(feature = "session-backend")]
+mod scanout;
 
 use staccato_config::StaccatoConfig;
 use thiserror::Error;

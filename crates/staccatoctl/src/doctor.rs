@@ -18,10 +18,11 @@ pub(crate) fn doctor_checks() -> Vec<DoctorCheck> {
             checks.push(check_ipc());
             checks.push(check_xwayland());
             checks.extend(check_session_services());
+            checks.extend(check_portal_services());
             checks.push(check_session_backend_dependencies());
             checks.push(DoctorCheck::ok(
                 "session-backend",
-                "DRM/KMS backend has initial single-output GBM/GLES modeset rendering",
+                "DRM/KMS backend has GBM/GLES modeset rendering with active-output hotplug refresh",
             ));
         }
         Err(error) => checks.push(DoctorCheck::fail("xdg-paths", error.to_string())),
@@ -185,13 +186,104 @@ fn check_session_services() -> Vec<DoctorCheck> {
             "install gnome-keyring-daemon or another Secret Service provider to avoid org.freedesktop.secrets timeouts",
         ));
     }
+
+    checks.push(check_known_binary(
+        "polkit-agent",
+        "polkit-gnome-authentication-agent-1",
+        &[
+            "/usr/libexec/polkit-gnome-authentication-agent-1",
+            "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+            "/usr/libexec/polkit-kde-authentication-agent-1",
+            "/usr/lib64/libexec/polkit-kde-authentication-agent-1",
+            "/usr/bin/lxpolkit",
+            "/usr/libexec/lxqt-policykit-agent",
+            "/usr/bin/lxqt-policykit-agent",
+            "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1",
+            "/usr/libexec/xfce-polkit",
+        ],
+        "install a PolicyKit authentication agent for GUI privilege prompts",
+    ));
     checks
+}
+
+fn check_portal_services() -> Vec<DoctorCheck> {
+    vec![
+        check_known_binary(
+            "portal-broker",
+            "xdg-desktop-portal",
+            &["/usr/libexec/xdg-desktop-portal"],
+            "install xdg-desktop-portal so sandboxed apps can reach desktop services",
+        ),
+        check_known_binary(
+            "portal-backend:gtk",
+            "xdg-desktop-portal-gtk",
+            &["/usr/libexec/xdg-desktop-portal-gtk"],
+            "install xdg-desktop-portal-gtk for file chooser, print, app chooser, and settings portals",
+        ),
+        check_known_binary(
+            "portal-backend:gnome",
+            "xdg-desktop-portal-gnome",
+            &["/usr/libexec/xdg-desktop-portal-gnome"],
+            "install xdg-desktop-portal-gnome for screenshot/screencast and non-GTK portal fallbacks",
+        ),
+        check_known_binary(
+            "portal-backend:secret",
+            "gnome-keyring-daemon",
+            &[
+                "/usr/bin/gnome-keyring-daemon",
+                "/usr/libexec/gnome-keyring-daemon",
+            ],
+            "install gnome-keyring-daemon for Secret Service portal support",
+        ),
+        check_portal_config(),
+    ]
+}
+
+fn check_known_binary(
+    check_name: &'static str,
+    binary: &'static str,
+    known_paths: &[&str],
+    missing: &'static str,
+) -> DoctorCheck {
+    match known_binary(binary, known_paths) {
+        Some(path) => DoctorCheck::ok(check_name, path.display().to_string()),
+        None => DoctorCheck::warning(check_name, missing),
+    }
+}
+
+fn check_portal_config() -> DoctorCheck {
+    match portal_config_paths().into_iter().find(|path| path.exists()) {
+        Some(path) => DoctorCheck::ok("portal-config", path.display().to_string()),
+        None => DoctorCheck::warning(
+            "portal-config",
+            "install data/xdg-desktop-portal/staccato-portals.conf into xdg-desktop-portal's data or config path",
+        ),
+    }
+}
+
+fn portal_config_paths() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("data/xdg-desktop-portal/staccato-portals.conf"),
+        PathBuf::from("/etc/xdg/xdg-desktop-portal/staccato-portals.conf"),
+        PathBuf::from("/usr/local/share/xdg-desktop-portal/staccato-portals.conf"),
+        PathBuf::from("/usr/share/xdg-desktop-portal/staccato-portals.conf"),
+    ]
 }
 
 fn sibling_binary(name: &str) -> Option<PathBuf> {
     let mut path = env::current_exe().ok()?;
     path.set_file_name(name);
     path.exists().then_some(path)
+}
+
+fn known_binary(name: &str, paths: &[&str]) -> Option<PathBuf> {
+    binary_in_path(name).or_else(|| {
+        paths
+            .iter()
+            .map(Path::new)
+            .find(|path| path.exists())
+            .map(Path::to_path_buf)
+    })
 }
 
 fn binary_in_path(name: &str) -> Option<PathBuf> {

@@ -1,18 +1,24 @@
 use crate::{background_effect::BackgroundEffectGlobal, state::BatonState};
+#[cfg(feature = "session-backend")]
+use smithay::wayland::dmabuf::DmabufGlobal;
 use smithay::{
     reexports::wayland_server::DisplayHandle,
     utils::{Clock, Monotonic},
     wayland::{
         alpha_modifier::AlphaModifierState, cursor_shape::CursorShapeManagerState,
-        fractional_scale::FractionalScaleManagerState, output::OutputManagerState,
-        presentation::PresentationState, shell::xdg::decoration::XdgDecorationState,
-        text_input::TextInputManagerState, viewporter::ViewporterState,
-        xdg_activation::XdgActivationState, xdg_toplevel_icon::XdgToplevelIconManager,
+        dmabuf::DmabufState, fractional_scale::FractionalScaleManagerState,
+        output::OutputManagerState, presentation::PresentationState,
+        shell::xdg::decoration::XdgDecorationState, text_input::TextInputManagerState,
+        viewporter::ViewporterState, xdg_activation::XdgActivationState,
+        xdg_toplevel_icon::XdgToplevelIconManager,
     },
 };
 
 pub struct ProtocolState {
     pub xdg_activation: XdgActivationState,
+    pub dmabuf: DmabufState,
+    #[cfg(feature = "session-backend")]
+    pub dmabuf_global: Option<DmabufGlobal>,
     _xdg_decoration: XdgDecorationState,
     _cursor_shape: CursorShapeManagerState,
     _fractional_scale: FractionalScaleManagerState,
@@ -34,6 +40,9 @@ impl ProtocolState {
 
         Self {
             xdg_activation: XdgActivationState::new::<BatonState>(display),
+            dmabuf: DmabufState::new(),
+            #[cfg(feature = "session-backend")]
+            dmabuf_global: None,
             _xdg_decoration: XdgDecorationState::new::<BatonState>(display),
             _cursor_shape: CursorShapeManagerState::new::<BatonState>(display),
             _fractional_scale: FractionalScaleManagerState::new::<BatonState>(display),

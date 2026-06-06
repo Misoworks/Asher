@@ -452,6 +452,12 @@ impl WindowStack {
             .map(|window| window.id)
     }
 
+    #[cfg(feature = "session-backend")]
+    pub fn fullscreen_window(&self, workspace: &WorkspaceId) -> Option<&ManagedWindow> {
+        let id = self.fullscreen_on_workspace(workspace)?;
+        self.windows.iter().find(|window| window.id == id)
+    }
+
     fn visible_windows_for_workspace(&self, workspace: &WorkspaceId) -> Vec<&ManagedWindow> {
         if let Some(fullscreen) = self.fullscreen_on_workspace(workspace) {
             return self

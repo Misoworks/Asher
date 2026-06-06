@@ -8,6 +8,7 @@ use crate::{
     workspace_transition::{WorkspaceTransition, WorkspaceTransitionSnapshot},
 };
 use smithay::{
+    backend::allocator::format::FormatSet,
     input::{
         Seat, SeatState,
         keyboard::KeyboardHandle,
@@ -70,6 +71,7 @@ pub struct BatonState {
     pub xwayland_status: XwaylandStatus,
     pub xwayland_display: Option<String>,
     pub titlebar_cache: RefCell<TitlebarCache>,
+    pub dmabuf_formats: FormatSet,
     scene_dirty: bool,
     workspace_transition: Option<WorkspaceTransition>,
     serial: u32,
@@ -134,6 +136,7 @@ impl BatonState {
             xwayland_status: XwaylandStatus::Disabled,
             xwayland_display: None,
             titlebar_cache: RefCell::new(TitlebarCache::default()),
+            dmabuf_formats: FormatSet::default(),
             scene_dirty: true,
             workspace_transition: None,
             serial: 1,
@@ -144,6 +147,27 @@ impl BatonState {
         let serial = self.serial;
         self.serial = self.serial.wrapping_add(1).max(1);
         Serial::from(serial)
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub fn enable_dmabuf(&mut self, formats: FormatSet) {
+        use smithay::backend::allocator::Format;
+
+        if self.protocol_state.dmabuf_global.is_some() {
+            return;
+        }
+
+        let advertised_formats = formats.iter().copied().collect::<Vec<Format>>();
+        if advertised_formats.is_empty() {
+            return;
+        }
+
+        let global = self
+            .protocol_state
+            .dmabuf
+            .create_global::<Self>(&self.display_handle, advertised_formats);
+        self.protocol_state.dmabuf_global = Some(global);
+        self.dmabuf_formats = formats;
     }
 
     pub fn map_toplevel(&mut self, surface: ToplevelSurface) {
