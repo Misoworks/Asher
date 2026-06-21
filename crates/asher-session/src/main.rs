@@ -1,0 +1,391 @@
+use asher_config::{BackendPreference, ConfigPaths, ConfigSource, load_config_or_default};
+use asher_session::{SessionDescriptor, SessionEnvironment, validate_descriptor};
+use clap::Parser;
+use std::{
+    env, fs,
+    fs::OpenOptions,
+    io,
+    os::unix::process::CommandExt,
+    path::{Path, PathBuf},
+    process::{Command, ExitCode},
+};
+use tracing::{info, warn};
+
+const PRIVATE_DBUS_ENV: &str = "ASHER_PRIVATE_DBUS";
+
+#[derive(Debug, Parser)]
+#[command(name = "asher-session", about = "Start a Asher desktop session")]
+struct SessionArgs {
+    #[arg(long, conflicts_with_all = ["headless", "session"])]
+    nested: bool,
+    #[arg(long, conflicts_with_all = ["nested", "session"])]
+    headless: bool,
+    #[arg(long, conflicts_with_all = ["nested", "headless"])]
+    session: bool,
+    #[arg(long)]
+    socket: Option<String>,
+    #[arg(long)]
+    kestrel: Option<PathBuf>,
+    #[arg(long)]
+    desktop_entry: bool,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    guard: bool,
+    #[arg(long)]
+    fallback_session: Option<String>,
+    #[arg(long, default_value_t = 8)]
+    startup_timeout_seconds: u64,
+}
+
+fn main() -> ExitCode {
+    init_logging();
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("asher-session: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args = SessionArgs::parse();
+    if args.desktop_entry {
+        print_desktop_entry()?;
+        return Ok(());
+    }
+
+    let (loaded, config_error) = load_config_or_default();
+    if let Some(error) = config_error {
+        warn!(%error, "failed to load user config; using built-in default config");
+    } else {
+        match &loaded.source {
+            ConfigSource::User(path) => info!(path = %path.display(), "loaded user config"),
+            ConfigSource::Defaults => warn!("using built-in default config"),
+        }
+    }
+
+    let backend = selected_backend(&args, loaded.config.compositor.backend);
+    let explicit_kestrel = args.kestrel.is_some() || env::var_os("ASHER_KESTREL").is_some();
+    if !args.dry_run && !explicit_kestrel {
+        ensure_dev_helpers_built(backend)?;
+    }
+    let kestrel = resolve_kestrel(args.kestrel.clone());
+    let environment = SessionEnvironment::default();
+    let mut command = session_command(&kestrel, backend);
+    environment.apply_to_command(&mut command);
+
+    if let Some(socket) = &args.socket {
+        command.arg("--socket").arg(socket);
+    }
+
+    if args.dry_run {
+        println!("{}", describe_launch(&command, backend));
+        return Ok(());
+    }
+
+    if args.guard {
+        return run_guarded(command, backend, &args);
+    }
+
+    info!(kestrel = %kestrel.display(), backend = backend.name(), "starting Kestrel");
+    let error = command.exec();
+    Err(Box::new(error))
+}
+
+fn run_guarded(
+    mut command: Command,
+    backend: KestrelBackend,
+    args: &SessionArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!(backend = backend.name(), "starting guarded Kestrel session");
+    let started = std::time::Instant::now();
+    let mut child = command.spawn()?;
+    let status = child.wait()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    let startup_window = std::time::Duration::from_secs(args.startup_timeout_seconds);
+    if started.elapsed() > startup_window {
+        return Err(format!("Kestrel exited with {status}").into());
+    }
+
+    let Some(fallback) = fallback_session_command(args) else {
+        return Err(format!("Kestrel exited during startup with {status}").into());
+    };
+
+    warn!(%status, fallback = %fallback, "Kestrel exited during startup; launching fallback session");
+    let error = Command::new("sh").arg("-lc").arg(fallback).exec();
+    Err(Box::new(error))
+}
+
+fn fallback_session_command(args: &SessionArgs) -> Option<String> {
+    args.fallback_session
+        .clone()
+        .or_else(|| env::var("ASHER_FALLBACK_SESSION").ok())
+}
+
+fn print_desktop_entry() -> Result<(), Box<dyn std::error::Error>> {
+    let descriptor = SessionDescriptor::default();
+    validate_descriptor(&descriptor)?;
+    print!("{}", descriptor.desktop_entry());
+    Ok(())
+}
+
+fn resolve_kestrel(explicit: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = explicit {
+        return path;
+    }
+    if let Some(path) = env::var_os("ASHER_KESTREL") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = sibling_binary("kestrel") {
+        return path;
+    }
+    PathBuf::from("kestrel")
+}
+
+fn session_command(kestrel: &Path, backend: KestrelBackend) -> Command {
+    if env::var_os("ASHER_USE_HOST_DBUS").is_none()
+        && let Some(dbus_run_session) = find_in_path("dbus-run-session")
+    {
+        let mut command = Command::new(dbus_run_session);
+        command
+            .env(PRIVATE_DBUS_ENV, "1")
+            .arg("--")
+            .arg(kestrel)
+            .arg(backend.flag());
+        return command;
+    }
+
+    let mut command = Command::new(kestrel);
+    command.arg(backend.flag());
+    command
+}
+
+fn find_in_path(program: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+fn sibling_binary(name: &str) -> Option<PathBuf> {
+    let mut path = env::current_exe().ok()?;
+    path.set_file_name(name);
+    path.exists().then_some(path)
+}
+
+fn ensure_dev_helpers_built(backend: KestrelBackend) -> io::Result<()> {
+    let Some(workspace) = dev_workspace() else {
+        return Ok(());
+    };
+
+    let mut command = Command::new("cargo");
+    command
+        .arg("build")
+        .arg("--manifest-path")
+        .arg(&workspace.manifest)
+        .arg("-p")
+        .arg("kestrel")
+        .arg("-p")
+        .arg("asher-shell")
+        .arg("-p")
+        .arg("asher-settings");
+    if matches!(backend, KestrelBackend::Session) {
+        command.arg("--features").arg("kestrel/session-backend");
+    }
+    if workspace.release {
+        command.arg("--release");
+    }
+
+    let status = command.status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "cargo failed to build Asher helper binaries: {status}"
+        )))
+    }
+}
+
+struct DevWorkspace {
+    manifest: PathBuf,
+    release: bool,
+}
+
+fn dev_workspace() -> Option<DevWorkspace> {
+    let exe = env::current_exe().ok()?;
+    let target = exe
+        .ancestors()
+        .find(|path| path.file_name() == Some("target".as_ref()))?;
+    let manifest = target.parent()?.join("Cargo.toml");
+    if !manifest.is_file() {
+        return None;
+    }
+    let release = exe
+        .strip_prefix(target)
+        .ok()?
+        .components()
+        .any(|component| component.as_os_str() == "release");
+    Some(DevWorkspace { manifest, release })
+}
+
+fn selected_backend(args: &SessionArgs, preference: BackendPreference) -> KestrelBackend {
+    if args.nested {
+        return KestrelBackend::Nested;
+    }
+    if args.headless {
+        return KestrelBackend::Headless;
+    }
+    if args.session {
+        return KestrelBackend::Session;
+    }
+
+    match preference {
+        BackendPreference::Nested => KestrelBackend::Nested,
+        BackendPreference::Headless => KestrelBackend::Headless,
+        BackendPreference::Session => KestrelBackend::Session,
+        BackendPreference::Auto => {
+            if env::var_os("WAYLAND_DISPLAY").is_some() {
+                KestrelBackend::Nested
+            } else {
+                KestrelBackend::Session
+            }
+        }
+    }
+}
+
+fn describe_command(command: &Command) -> String {
+    let program = command.get_program().to_string_lossy();
+    let args = command
+        .get_args()
+        .map(|arg| shell_escape(&arg.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{program} {args}")
+    }
+}
+
+fn describe_launch(command: &Command, backend: KestrelBackend) -> String {
+    let mut lines = vec![format!("backend={}", backend.name())];
+    let mut envs = command
+        .get_envs()
+        .filter_map(|(name, value)| {
+            value.map(|value| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    envs.sort_by(|left, right| left.0.cmp(&right.0));
+    for (name, value) in envs {
+        lines.push(format!("env {name}={}", shell_escape(&value)));
+    }
+    lines.push(format!("command={}", describe_command(command)));
+    lines.join("\n")
+}
+
+fn shell_escape(value: &str) -> String {
+    if value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "-_./:=+".contains(character))
+    {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn init_logging() {
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(file_log_writer("asher-session"))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("asher_session=info")),
+        )
+        .finish();
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+fn file_log_writer(component: &'static str) -> impl Fn() -> Box<dyn io::Write + Send> + Clone {
+    let path = ConfigPaths::discover()
+        .ok()
+        .map(|paths| paths.log_file(component));
+    move || -> Box<dyn io::Write + Send> {
+        let Some(path) = &path else {
+            return Box::new(io::stderr());
+        };
+        if let Some(parent) = path.parent()
+            && fs::create_dir_all(parent).is_err()
+        {
+            return Box::new(io::stderr());
+        }
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => Box::new(file),
+            Err(_) => Box::new(io::stderr()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KestrelBackend {
+    Nested,
+    Headless,
+    Session,
+}
+
+impl KestrelBackend {
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Nested => "--nested",
+            Self::Headless => "--headless",
+            Self::Session => "--session",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Nested => "nested",
+            Self::Headless => "headless",
+            Self::Session => "session",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_escape_keeps_safe_values_plain() {
+        assert_eq!(shell_escape("/usr/bin/kestrel"), "/usr/bin/kestrel");
+        assert_eq!(shell_escape("--session"), "--session");
+    }
+
+    #[test]
+    fn shell_escape_quotes_values_with_spaces() {
+        assert_eq!(shell_escape("/tmp/Asher Kestrel"), "'/tmp/Asher Kestrel'");
+    }
+
+    #[test]
+    fn dry_run_description_shows_backend_env_and_command() {
+        let mut command = Command::new("/usr/bin/kestrel");
+        command.env("XDG_SESSION_TYPE", "wayland").arg("--session");
+
+        let description = describe_launch(&command, KestrelBackend::Session);
+
+        assert!(description.contains("backend=session"));
+        assert!(description.contains("env XDG_SESSION_TYPE=wayland"));
+        assert!(description.contains("command=/usr/bin/kestrel --session"));
+    }
+}

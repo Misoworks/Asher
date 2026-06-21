@@ -1,0 +1,61 @@
+use crate::{background_effect::BackgroundEffectGlobal, state::KestrelState};
+#[cfg(feature = "session-backend")]
+use smithay::wayland::dmabuf::DmabufGlobal;
+use smithay::{
+    reexports::wayland_server::DisplayHandle,
+    utils::{Clock, Monotonic},
+    wayland::{
+        alpha_modifier::AlphaModifierState, cursor_shape::CursorShapeManagerState,
+        dmabuf::DmabufState, fractional_scale::FractionalScaleManagerState,
+        output::OutputManagerState, presentation::PresentationState,
+        shell::xdg::decoration::XdgDecorationState, text_input::TextInputManagerState,
+        viewporter::ViewporterState, xdg_activation::XdgActivationState,
+        xdg_toplevel_icon::XdgToplevelIconManager,
+    },
+};
+
+pub struct ProtocolState {
+    pub xdg_activation: XdgActivationState,
+    pub dmabuf: DmabufState,
+    #[cfg(feature = "session-backend")]
+    pub dmabuf_global: Option<DmabufGlobal>,
+    _xdg_decoration: XdgDecorationState,
+    _cursor_shape: CursorShapeManagerState,
+    _fractional_scale: FractionalScaleManagerState,
+    _viewporter: ViewporterState,
+    _xdg_toplevel_icon: XdgToplevelIconManager,
+    _text_input: TextInputManagerState,
+    _presentation: PresentationState,
+    _output: OutputManagerState,
+    _background_effect: BackgroundEffectGlobal,
+    _alpha_modifier: AlphaModifierState,
+}
+
+impl ProtocolState {
+    pub fn new(display: &DisplayHandle) -> Self {
+        let mut xdg_toplevel_icon = XdgToplevelIconManager::new::<KestrelState>(display);
+        for size in [16, 24, 32, 48, 64, 128] {
+            xdg_toplevel_icon.add_icon_size(size);
+        }
+
+        Self {
+            xdg_activation: XdgActivationState::new::<KestrelState>(display),
+            dmabuf: DmabufState::new(),
+            #[cfg(feature = "session-backend")]
+            dmabuf_global: None,
+            _xdg_decoration: XdgDecorationState::new::<KestrelState>(display),
+            _cursor_shape: CursorShapeManagerState::new::<KestrelState>(display),
+            _fractional_scale: FractionalScaleManagerState::new::<KestrelState>(display),
+            _viewporter: ViewporterState::new::<KestrelState>(display),
+            _xdg_toplevel_icon: xdg_toplevel_icon,
+            _text_input: TextInputManagerState::new::<KestrelState>(display),
+            _presentation: PresentationState::new::<KestrelState>(
+                display,
+                Clock::<Monotonic>::new().id() as u32,
+            ),
+            _output: OutputManagerState::new_with_xdg_output::<KestrelState>(display),
+            _background_effect: BackgroundEffectGlobal::new(display),
+            _alpha_modifier: AlphaModifierState::new::<KestrelState>(display),
+        }
+    }
+}

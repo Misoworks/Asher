@@ -9,7 +9,22 @@ safe_mode = false
 backend = "auto"
 xwayland = true
 debug_overlay = false
-prefer_direct_scanout = true
+
+[display]
+default_scale = 1.0
+
+[session]
+lock_command = "if command -v asher-lock >/dev/null 2>&1; then exec asher-lock; elif command -v gtklock >/dev/null 2>&1; then exec gtklock; elif command -v swaylock >/dev/null 2>&1; then exec swaylock; elif command -v waylock >/dev/null 2>&1; then exec waylock; else exec loginctl lock-session; fi"
+suspend_command = "systemctl suspend"
+reboot_command = "systemctl reboot"
+poweroff_command = "systemctl poweroff"
+
+[appearance]
+material_mode = "glass"
+shell_mode = "panel"
+dock_icon_size = 40
+dock_magnification = true
+taskbar_launcher = true
 
 [effects]
 background_effect_protocol = true
@@ -31,7 +46,7 @@ backup_before_apply = true
 terminal = "ghostty"
 file_manager = "nautilus"
 browser = "google-chrome-stable"
-settings = "gnome-control-center"
+settings = "asher-settings"
 launcher = "vicinae"
 
 [dock]

@@ -1,0 +1,148 @@
+.app-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--dock-item-size);
+  height: var(--dock-item-size);
+  overflow: visible;
+  color: var(--panel-text);
+  border-radius: 12px;
+  transform-origin: center;
+  transition:
+    background-color 145ms var(--ease-shell),
+    box-shadow 145ms var(--ease-shell),
+    transform 120ms var(--ease-shell);
+  z-index: 1;
+}
+
+.app-button:hover {
+  background: var(--material-control);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.app-button.is-reordering {
+  background: var(--material-control);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 8px 18px rgba(0, 0, 0, 0.18);
+  cursor: grabbing;
+  transform: translateY(-4px) scale(1.03);
+  z-index: 6;
+}
+
+.app-button:hover .app-icon {
+  --app-icon-y: var(--app-icon-lift, -9px);
+  transform: translateY(var(--app-icon-y));
+  will-change: transform;
+}
+
+#app[data-dock-magnification="false"] .app-button:hover .app-icon {
+  transform: none;
+  will-change: auto;
+}
+
+.app-button:active {
+  transform: scale(0.96);
+}
+
+.app-icon {
+  display: grid;
+  place-items: center;
+  width: var(--dock-icon-size);
+  height: var(--dock-icon-size);
+  overflow: visible;
+  transform-origin: center bottom;
+  pointer-events: none;
+  transition: transform 145ms var(--ease-shell);
+  backface-visibility: hidden;
+}
+
+.app-icon img,
+.app-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.app-button.is-launching .app-icon {
+  --app-launch-rest-y: 0px;
+  animation: app-launch 430ms var(--ease-shell) both;
+  will-change: transform;
+}
+
+.app-button.is-launching.is-launch-raised .app-icon {
+  --app-launch-rest-y: var(--app-icon-lift, -9px);
+}
+
+#app[data-surface="dock"] .app-button,
+#app[data-surface="panel"] .app-button {
+  --app-icon-lift: -10px;
+}
+
+.running-dot {
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.app-button.is-launch-settling .app-icon {
+  animation: app-launch-settle 180ms var(--ease-shell) both;
+  will-change: transform;
+}
+
+.app-button.is-running .running-dot {
+  opacity: 1;
+}
+
+.app-button.is-active .running-dot {
+  width: 24px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.app-button .running-dot {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 7px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.8);
+  transition:
+    width 180ms var(--ease-shell),
+    opacity 180ms var(--ease-shell);
+}
+
+@keyframes app-launch {
+  0%,
+  100% {
+    transform: translateY(var(--app-launch-rest-y, 0px));
+  }
+
+  24% {
+    transform: translateY(calc(var(--app-launch-rest-y, 0px) + 5px));
+  }
+
+  52% {
+    transform: translateY(calc(var(--app-launch-rest-y, 0px) - 7px));
+  }
+
+  76% {
+    transform: translateY(calc(var(--app-launch-rest-y, 0px) - 2px));
+  }
+}
+
+@keyframes app-launch-settle {
+  from {
+    transform: translateY(var(--app-icon-lift, -9px));
+  }
+
+  68% {
+    transform: translateY(1px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}

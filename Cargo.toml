@@ -1,12 +1,15 @@
 [workspace]
 members = [
-    "crates/baton",
-    "crates/staccato-config",
-    "crates/staccato-ipc",
-    "crates/staccato-layout",
-    "crates/staccato-session",
-    "crates/staccato-shell",
-    "crates/staccatoctl",
+    "crates/kestrel",
+    "crates/asher-config",
+    "crates/asher-ipc",
+    "crates/asher-layout",
+    "crates/asher-material",
+    "crates/asher-greeter",
+    "crates/asher-session",
+    "crates/asher-shell",
+    "crates/asher-settings",
+    "crates/asherctl",
 ]
 resolver = "3"
 
@@ -17,6 +20,8 @@ license = "MIT"
 
 [workspace.dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
+libc = "0.2.177"
+pam-client2 = { version = "0.5.5", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 smithay = { version = "0.7.0", default-features = false, features = ["backend_winit", "desktop", "wayland_frontend"] }
@@ -24,16 +29,21 @@ thiserror = "2.0.18"
 toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+users = { version = "0.11.0", default-features = false }
 
-staccato-config = { path = "crates/staccato-config" }
-staccato-ipc = { path = "crates/staccato-ipc" }
-staccato-layout = { path = "crates/staccato-layout" }
-staccato-session = { path = "crates/staccato-session" }
+asher-config = { path = "crates/asher-config" }
+asher-ipc = { path = "crates/asher-ipc" }
+asher-layout = { path = "crates/asher-layout" }
+asher-material = { path = "crates/asher-material" }
+asher-session = { path = "crates/asher-session" }
 
-[profile.dev.package."baton"]
+[profile.dev.package."kestrel"]
 opt-level = 2
 
-[profile.dev.package."staccato-shell"]
+[profile.dev.package."asher-shell"]
+opt-level = 2
+
+[profile.dev.package."asher-settings"]
 opt-level = 2
 
 [profile.dev.package."smithay"]

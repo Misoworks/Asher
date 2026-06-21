@@ -1,0 +1,128 @@
+use asher_layout::{ProfileId, WindowId, WorkspaceId};
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum WebShellAction {
+    OpenLauncher,
+    LaunchDefaultApp {
+        app: asher_ipc::DefaultAppKind,
+    },
+    ToggleOverview,
+    ToggleQuickSettings,
+    ToggleDateCenter,
+    WorkspaceSwitch {
+        workspace: String,
+    },
+    WorkspaceRelative {
+        offset: i32,
+    },
+    WorkspaceNew,
+    WorkspaceSetProfile {
+        profile: String,
+    },
+    WindowActivate {
+        window: u64,
+    },
+    WindowMove {
+        window: u64,
+        workspace: String,
+    },
+    DockLaunch {
+        command: String,
+    },
+    DockMenuOpen {
+        command: String,
+        x: Option<i32>,
+    },
+    DockMenuClose,
+    DockPin {
+        label: String,
+        command: String,
+        icon: Option<String>,
+    },
+    DockUnpin {
+        command: String,
+    },
+    DockReorder {
+        commands: Vec<String>,
+    },
+    AppLaunch {
+        command: String,
+    },
+    TrayActivate {
+        index: usize,
+    },
+    TrayMenu {
+        index: usize,
+    },
+    QuickOpenSettings {
+        page: QuickSettingsPage,
+    },
+    QuickSetVolume {
+        percent: u8,
+    },
+    QuickToggleMute,
+    QuickSetBrightness {
+        percent: u8,
+    },
+    QuickToggleDebugOverlay,
+    SessionCommand {
+        command: SessionCommand,
+    },
+    ReloadConfig,
+    OpenLogsFolder,
+    ToggleSafeMode,
+    NotificationClose {
+        notification: u32,
+    },
+    NotificationClearAll,
+    NotificationDoNotDisturb {
+        enabled: bool,
+    },
+    NotificationAction {
+        notification: u32,
+        action: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionCommand {
+    Lock,
+    Suspend,
+    Reboot,
+    PowerOff,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum QuickSettingsPage {
+    Appearance,
+    Network,
+    Audio,
+    Power,
+}
+
+impl QuickSettingsPage {
+    pub fn as_settings_arg(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Network => "network",
+            Self::Audio => "sound",
+            Self::Power => "power",
+        }
+    }
+}
+
+pub fn workspace_id(value: String) -> WorkspaceId {
+    WorkspaceId(value)
+}
+
+pub fn profile_id(value: String) -> ProfileId {
+    ProfileId(value)
+}
+
+pub fn window_id(value: u64) -> WindowId {
+    WindowId(value)
+}

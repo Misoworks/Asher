@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Asher
+Comment=Asher Desktop Environment
+Exec=asher-session --session --guard
+TryExec=asher-session
+Type=Application
+DesktopNames=Asher
+Keywords=wayland;desktop;session;
