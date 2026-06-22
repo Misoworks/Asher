@@ -26,6 +26,13 @@ impl KestrelState {
         );
     }
 
+    pub fn close_shell_transient_popovers(&self) {
+        self.send_shell_control(
+            asher_ipc::ShellControlRequest::CloseTransientPopovers,
+            "close transient popovers",
+        );
+    }
+
     pub fn request_shell_restart(&mut self) {
         self.shell_restart_requested = Some(ShellRestartRequest::Normal);
     }

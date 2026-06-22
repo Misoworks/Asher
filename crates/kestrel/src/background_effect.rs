@@ -247,7 +247,7 @@ fn append_workspace_targets(
         let Some(region) = current_blur_region(surface) else {
             continue;
         };
-        let clip = window.surface_geometry();
+        let clip = Rectangle::from_size(window.surface_geometry().size);
         for rect in rects_for_region(&region, clip) {
             targets.push(LayerRenderTarget {
                 surface: surface.clone(),

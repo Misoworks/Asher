@@ -181,7 +181,8 @@ fn render_staged_scene(
             request.blur_enabled,
         )?;
         let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
-        draw_render_elements(&mut frame, 1.0, &blur, request.damage)?;
+        let blur_damage = blur_target_damage(request.output_size, &targets);
+        draw_render_elements(&mut frame, 1.0, &blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, &window, request.damage)?;
         draw_render_elements(&mut frame, 1.0, &chrome, request.damage)?;
         let _ = frame.finish()?;
@@ -207,7 +208,8 @@ fn render_staged_scene(
     )?;
     {
         let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
-        draw_render_elements(&mut frame, 1.0, &top_blur, request.damage)?;
+        let blur_damage = blur_target_damage(request.output_size, request.top_targets);
+        draw_render_elements(&mut frame, 1.0, &top_blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, request.top_layer, request.damage)?;
         let _ = frame.finish()?;
     }
@@ -223,7 +225,8 @@ fn render_staged_scene(
         request.blur_enabled,
     )?;
     let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
-    draw_render_elements(&mut frame, 1.0, &overlay_blur, request.damage)?;
+    let blur_damage = blur_target_damage(request.output_size, request.overlay_targets);
+    draw_render_elements(&mut frame, 1.0, &overlay_blur, &blur_damage)?;
     draw_render_elements(&mut frame, 1.0, request.overlay_layer, request.damage)?;
     draw_optional_memory(&mut frame, request.loading.as_ref(), request.damage)?;
     draw_optional_memory(&mut frame, request.debug.as_ref(), request.damage)?;
@@ -263,6 +266,23 @@ fn draw_optional_memory(
     }
 
     Ok(())
+}
+
+fn blur_target_damage(
+    output_size: Size<i32, Physical>,
+    targets: &[LayerRenderTarget],
+) -> Vec<Rectangle<i32, Physical>> {
+    let output = Rectangle::<i32, Physical>::from_size(output_size);
+    targets
+        .iter()
+        .filter_map(|target| {
+            Rectangle::<i32, Physical>::new(
+                (target.location.x, target.location.y).into(),
+                (target.size.w, target.size.h).into(),
+            )
+            .intersection(output)
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,4 +1,4 @@
-use crate::window_clip::RoundedWindowElement;
+use crate::{layers::LayerRenderTarget, window_clip::RoundedWindowElement};
 use smithay::{
     backend::renderer::{
         damage::OutputDamageTracker,
@@ -63,8 +63,6 @@ impl DamageTracker {
             },
         }
     }
-
-    pub fn record(&mut self, _plan: DamagePlan) {}
 }
 
 #[derive(Clone, Copy)]
@@ -188,8 +186,10 @@ pub(crate) fn blur_damage_elements<'a>(
     background_layer: &'a [SurfaceElement],
     bottom_layer: &'a [SurfaceElement],
     windows: &'a [WindowElement],
+    top_layer: &'a [SurfaceElement],
 ) -> Vec<DamageElement<'a>> {
     let mut elements = Vec::new();
+    elements.extend(top_layer.iter().map(DamageElement::Surface));
     elements.extend(windows.iter().map(DamageElement::Window));
     elements.extend(bottom_layer.iter().map(DamageElement::Surface));
     elements.extend(background_layer.iter().map(DamageElement::Surface));
@@ -204,6 +204,34 @@ pub fn damage_area(rectangles: &[Rectangle<i32, Physical>]) -> i32 {
         .iter()
         .map(|rect| rect.size.w.saturating_mul(rect.size.h))
         .fold(0, i32::saturating_add)
+}
+
+pub(crate) fn expand_damage_for_blur_targets(
+    output_size: Size<i32, Physical>,
+    damage: &[Rectangle<i32, Physical>],
+    blur_damage: &[Rectangle<i32, Physical>],
+    target_groups: &[&[LayerRenderTarget]],
+) -> Vec<Rectangle<i32, Physical>> {
+    let mut expanded = damage.to_vec();
+    let output = Rectangle::<i32, Physical>::from_size(output_size);
+    for target in target_groups.iter().flat_map(|targets| targets.iter()) {
+        let target_rect = Rectangle::<i32, Physical>::new(
+            (target.location.x, target.location.y).into(),
+            (target.size.w, target.size.h).into(),
+        );
+        if let Some(rect) = target_rect.intersection(output) {
+            let target_changed = damage
+                .iter()
+                .any(|damage| damage.intersection(rect).is_some());
+            let behind_target_changed = blur_damage
+                .iter()
+                .any(|damage| damage.intersection(rect).is_some());
+            if target_changed || behind_target_changed {
+                expanded.push(rect);
+            }
+        }
+    }
+    expanded
 }
 
 fn full_damage(output_size: Size<i32, Physical>) -> Rectangle<i32, Physical> {

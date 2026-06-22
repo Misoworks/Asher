@@ -6,7 +6,10 @@ use super::{
 use crate::{
     background::Background,
     background_effect,
-    damage::{DamageTracker, blur_damage_elements, damage_area, damage_elements},
+    damage::{
+        DamageTracker, blur_damage_elements, damage_area, damage_elements,
+        expand_damage_for_blur_targets,
+    },
     debug_overlay::{DebugOverlayCache, DebugOverlayStats, render_debug_overlay},
     frame_clock::FrameClock,
     frame_clock::FrameTime,
@@ -178,6 +181,9 @@ impl SessionFrameRenderer {
         let bottom_layer =
             render_stage_elements(renderer, state, RenderStage::Layer(Layer::Bottom));
         let window_effect_targets = background_effect::window_blur_targets(state);
+        let blur_targets_active = !window_effect_targets.is_empty()
+            || !top_targets.is_empty()
+            || !overlay_targets.is_empty();
         if blur_enabled {
             let mut blur_targets = window_effect_targets.clone();
             blur_targets.extend(top_targets.iter().cloned());
@@ -238,6 +244,7 @@ impl SessionFrameRenderer {
         let (mut dmabuf, buffer_age) = surface.next_buffer().map_err(|error| {
             DrmError::Unsupported(format!("failed to acquire GBM buffer: {error}"))
         })?;
+        let blur_needs_full_buffer = blur_enabled && blur_targets_active && buffer_age > 1;
         let mut framebuffer = renderer.bind(&mut dmabuf).map_err(|error| {
             DrmError::Unsupported(format!("failed to bind GBM buffer: {error}"))
         })?;
@@ -257,7 +264,10 @@ impl SessionFrameRenderer {
             self.damage_tracker.plan(
                 state.output_size(),
                 usize::from(buffer_age),
-                force_full_damage || blur_animating || self.previous_frame_direct,
+                force_full_damage
+                    || blur_animating
+                    || self.previous_frame_direct
+                    || blur_needs_full_buffer,
                 &damage_elements,
             )
         };
@@ -267,15 +277,28 @@ impl SessionFrameRenderer {
                 &background_layer,
                 &bottom_layer,
                 &windows,
+                &top_layer,
             );
             self.blur_damage_tracker.plan(
                 state.output_size(),
                 usize::from(buffer_age),
-                force_full_damage || blur_animating || self.previous_frame_direct,
+                force_full_damage
+                    || blur_animating
+                    || self.previous_frame_direct
+                    || blur_needs_full_buffer,
                 &blur_damage_elements,
             )
         };
-        let damage = damage_plan.rectangles.clone();
+        let damage = if blur_enabled {
+            expand_damage_for_blur_targets(
+                state.output_size(),
+                &damage_plan.rectangles,
+                &blur_damage_plan.rectangles,
+                &[&window_effect_targets, &top_targets, &overlay_targets],
+            )
+        } else {
+            damage_plan.rectangles.clone()
+        };
         let blur_damage = blur_damage_plan.rectangles.clone();
         self.previous_damage_area = damage_area(&damage);
 
@@ -312,8 +335,6 @@ impl SessionFrameRenderer {
                 .map_err(|error| {
                     DrmError::Unsupported(format!("failed to queue DRM frame: {error}"))
                 })?;
-            self.damage_tracker.record(damage_plan);
-            self.blur_damage_tracker.record(blur_damage_plan);
             self.fps_frames += 1;
             self.previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
             self.previous_frame_direct = false;

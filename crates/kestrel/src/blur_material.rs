@@ -4,7 +4,12 @@ use smithay::{
     utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform},
 };
 
-const BLUR_RADIUS: i32 = 4;
+const BLUR_RADIUS: i32 = 5;
+const GLASS_SATURATION: f32 = 1.04;
+const GLASS_BRIGHTNESS: f32 = 1.0;
+const GLASS_NOISE: f32 = 1.1;
+const GLASS_TINT: [f32; 3] = [22.0, 21.0, 19.0];
+const GLASS_TINT_AMOUNT: f32 = 0.0;
 
 pub fn build_blur_patch_for_material(
     source: &[u8],
@@ -34,7 +39,16 @@ pub fn build_blur_patch_for_material(
     }
 
     box_blur(&mut low_pixels, low_width, low_height, BLUR_RADIUS);
-    let pixels = upscale_masked(&low_pixels, low_width, low_height, width, height, material);
+    box_blur(&mut low_pixels, low_width, low_height, 2);
+    let pixels = upscale_material(
+        location,
+        &low_pixels,
+        low_width,
+        low_height,
+        width,
+        height,
+        material,
+    );
     MemoryRenderBuffer::from_slice(
         &pixels,
         Fourcc::Abgr8888,
@@ -53,10 +67,11 @@ fn div_ceil(value: i32, divisor: i32) -> i32 {
     (value + divisor - 1) / divisor
 }
 
-fn upscale_masked(
-    source: &[u8],
-    source_width: i32,
-    source_height: i32,
+fn upscale_material(
+    location: Point<i32, Logical>,
+    blurred: &[u8],
+    blurred_width: i32,
+    blurred_height: i32,
     width: i32,
     height: i32,
     material: LayerMaterial,
@@ -64,14 +79,53 @@ fn upscale_masked(
     let mut pixels = vec![0; (width * height * 4) as usize];
     for y in 0..height {
         for x in 0..width {
-            let mut pixel = sample_pixel(source, source_width, source_height, x, y, width, height);
+            let mut glass =
+                sample_pixel(blurred, blurred_width, blurred_height, x, y, width, height);
+            apply_glass_treatment(&mut glass, x, y, location);
             let coverage = material_coverage(material, x, y, width, height);
-            pixel[3] = ((pixel[3] as f32 * coverage).round() as i32).clamp(0, 255) as u8;
+            let pixel = glass_pixel(glass, coverage);
             let index = ((y * width + x) * 4) as usize;
             pixels[index..index + 4].copy_from_slice(&pixel);
         }
     }
     pixels
+}
+
+fn apply_glass_treatment(pixel: &mut [u8; 4], x: i32, y: i32, location: Point<i32, Logical>) {
+    let luma = pixel_luma(pixel);
+    let noise = material_noise(x + location.x, y + location.y) * GLASS_NOISE;
+    for (channel_index, channel) in pixel.iter_mut().take(3).enumerate() {
+        let saturated = luma + (*channel as f32 - luma) * GLASS_SATURATION;
+        let dimmed = saturated * GLASS_BRIGHTNESS;
+        let tinted = dimmed + (GLASS_TINT[channel_index] - dimmed) * GLASS_TINT_AMOUNT;
+        *channel = (tinted + noise).round().clamp(0.0, 255.0) as u8;
+    }
+    pixel[3] = 255;
+}
+
+fn glass_pixel(mut pixel: [u8; 4], coverage: f32) -> [u8; 4] {
+    let alpha = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+    pixel[0] = premultiply(pixel[0], alpha);
+    pixel[1] = premultiply(pixel[1], alpha);
+    pixel[2] = premultiply(pixel[2], alpha);
+    pixel[3] = alpha;
+    pixel
+}
+
+fn premultiply(value: u8, alpha: u8) -> u8 {
+    (u32::from(value) * u32::from(alpha) / 255) as u8
+}
+
+fn pixel_luma(pixel: &[u8; 4]) -> f32 {
+    pixel[0] as f32 * 0.2126 + pixel[1] as f32 * 0.7152 + pixel[2] as f32 * 0.0722
+}
+
+fn material_noise(x: i32, y: i32) -> f32 {
+    let mut value = (x as u32).wrapping_mul(0x45d9f3b) ^ (y as u32).wrapping_mul(0x119de1f3);
+    value ^= value >> 16;
+    value = value.wrapping_mul(0x45d9f3b);
+    value ^= value >> 16;
+    value as f32 / u32::MAX as f32 - 0.5
 }
 
 fn sample_pixel(

@@ -254,10 +254,14 @@ impl SceneBlurCacheEntry {
             return (self.target_opacity * (1.0 - progress)).clamp(0.0, 1.0);
         }
         (current_opacity
-            * duration_progress(
-                now.saturating_duration_since(self.appeared_at),
-                BLUR_FADE_IN,
-            ))
+            * if self.blur_layer == BlurLayer::Window {
+                duration_progress(
+                    now.saturating_duration_since(self.appeared_at),
+                    BLUR_FADE_IN,
+                )
+            } else {
+                1.0
+            })
         .clamp(0.0, 1.0)
     }
 }

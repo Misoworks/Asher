@@ -1,4 +1,5 @@
 use crate::{
+    layers,
     state::KestrelState,
     window::{ResizeEdge, WindowFrameControl, WindowFrameHit, WindowGrab},
 };
@@ -89,6 +90,15 @@ pub fn handle_input_event<B>(
             let mut frame_interaction = false;
             let left_button = event.button_code() == BTN_LEFT;
             let right_button = event.button_code() == BTN_RIGHT;
+
+            if event.state().is_pressed()
+                && (left_button || right_button)
+                && layers::should_close_transient_popover(state.output(), state.pointer_location)
+            {
+                state.close_shell_transient_popovers();
+                keyboard.set_focus(state, None, serial);
+                return;
+            }
 
             if state.super_active
                 && event.state().is_pressed()

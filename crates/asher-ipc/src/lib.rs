@@ -143,6 +143,7 @@ pub enum ShellControlRequest {
     LaunchDefaultApp { app: DefaultAppKind },
     OpenLauncher,
     ToggleOverview,
+    CloseTransientPopovers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

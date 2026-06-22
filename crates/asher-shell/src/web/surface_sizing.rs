@@ -1,6 +1,7 @@
 use super::model::WebShellSnapshot;
 
 pub(crate) const QUICK_SETTINGS_WIDTH: i32 = 420;
+pub(crate) const QUICK_SETTINGS_OVERFLOW_BOTTOM: i32 = 40;
 pub(crate) const NOTIFICATION_TOAST_WIDTH: i32 = 380;
 pub(crate) const NOTIFICATION_TOAST_HEIGHT: i32 = 136;
 
@@ -15,7 +16,10 @@ pub(crate) fn quick_settings_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
     if sliders > 0 {
         height += 14 + sliders * 58 + (sliders - 1) * 10;
     }
-    (QUICK_SETTINGS_WIDTH, height.max(230))
+    (
+        QUICK_SETTINGS_WIDTH,
+        height.max(230) + QUICK_SETTINGS_OVERFLOW_BOTTOM,
+    )
 }
 
 pub(crate) fn notification_toast_size() -> (i32, i32) {

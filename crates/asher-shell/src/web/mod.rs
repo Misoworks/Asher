@@ -142,6 +142,9 @@ impl WebShell {
                         }
                         asher_ipc::ShellControlRequest::OpenLauncher => self.open_launcher(),
                         asher_ipc::ShellControlRequest::ToggleOverview => self.toggle_overview(),
+                        asher_ipc::ShellControlRequest::CloseTransientPopovers => {
+                            self.close_transient_popovers()
+                        }
                     }
                 }
             }
@@ -323,6 +326,16 @@ impl WebShell {
         self.surfaces.date.set_visible(self.date_visible);
         self.surfaces.quick.set_visible(false);
         self.surfaces.overview.set_visible(false);
+    }
+
+    fn close_transient_popovers(&mut self) {
+        self.quick_visible = false;
+        self.date_visible = false;
+        self.close_dock_menu();
+        self.sync_chrome();
+        self.sync_surfaces();
+        self.surfaces.quick.set_visible(false);
+        self.surfaces.date.set_visible(false);
     }
 
     fn new_workspace_from_overview(&mut self) {

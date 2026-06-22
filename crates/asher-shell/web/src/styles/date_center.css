@@ -1,5 +1,7 @@
 .date-center {
   --popover-width: 360px;
+  height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
@@ -7,14 +9,6 @@
   align-items: start;
   padding: 18px;
   overflow: hidden;
-}
-
-.date-center:not(.is-empty) {
-  height: auto;
-}
-
-.date-center.is-empty {
-  height: auto;
 }
 
 .date-center .notification-center {

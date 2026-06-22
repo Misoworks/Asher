@@ -11,8 +11,8 @@ use asher_layout::ProfileId;
 use clap::ValueEnum;
 use fenestra_cef::{
     BridgeCommand, BridgeCommandDescriptor, BridgeError, BridgeResponse, BridgeResult,
-    FenestraWindow, FenestraWindowControlAction, RuntimeConfig, RuntimeMode, WebViewSecurity,
-    WindowBackgroundEffect, WindowRegion, WindowRegionRect,
+    FenestraWindow, RuntimeConfig, RuntimeMode, WebViewSecurity, WindowBackgroundEffect,
+    WindowRegion, WindowRegionRect,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -95,29 +95,22 @@ fn build_window(config: AsherConfig, page: SettingsPage) -> FenestraWindow {
         .size(WINDOW_WIDTH, WINDOW_HEIGHT)
         .min_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .frameless()
+        .resizable(false)
         .glass_material(material)
         .runtime(runtime_config())
         .security(WebViewSecurity::default())
-        .blur_region(WindowRegion::adaptive_rounded_rect(WINDOW_RADIUS))
+        .blur_region(WindowRegion::adaptive_rounded_left(
+            SIDEBAR_WIDTH,
+            WINDOW_RADIUS,
+        ))
         .input_region(WindowRegion::adaptive_rounded_rect(WINDOW_RADIUS))
+        .drag_region(WindowRegionRect::new(210, 0, SIDEBAR_WIDTH - 210, 92))
         .drag_region(WindowRegionRect::new(
             SIDEBAR_WIDTH + 280,
             0,
             i32::MAX,
             TITLEBAR_HEIGHT,
-        ))
-        .control_region(
-            FenestraWindowControlAction::Close,
-            WindowRegionRect::new(12, 12, 32, 32),
-        )
-        .control_region(
-            FenestraWindowControlAction::Minimize,
-            WindowRegionRect::new(48, 12, 32, 32),
-        )
-        .control_region(
-            FenestraWindowControlAction::Maximize,
-            WindowRegionRect::new(84, 12, 32, 32),
-        );
+        ));
 
     window = register_bridge(window, state, page);
     match settings_entry(page) {

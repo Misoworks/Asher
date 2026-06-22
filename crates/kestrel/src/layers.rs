@@ -7,9 +7,8 @@ use smithay::{
     utils::{Logical, Point},
     wayland::{
         alpha_modifier::AlphaModifierSurfaceCachedState,
-        compositor::{self, BufferAssignment, SurfaceAttributes},
+        compositor,
         shell::wlr_layer::{Layer, LayerSurface as WlrLayerSurface},
-        shm,
     },
 };
 use tracing::debug;
@@ -87,6 +86,10 @@ pub fn keyboard_focus(output: &Output, point: Point<f64, Logical>) -> Option<WlS
             continue;
         };
 
+        if !surface_accepts_input(surface) {
+            continue;
+        }
+
         if surface.can_receive_keyboard_focus() {
             return Some(surface.wl_surface().clone());
         }
@@ -99,6 +102,30 @@ pub fn has_layer_above_windows(output: &Output, point: Point<f64, Logical>) -> b
     [Layer::Overlay, Layer::Top]
         .into_iter()
         .any(|layer| pointer_focus_on_layer(output, point, layer).is_some())
+}
+
+pub fn should_close_transient_popover(output: &Output, point: Point<f64, Logical>) -> bool {
+    let layer_map = layer_map_for_output(output);
+    let mut has_transient = false;
+    for surface in layer_map.layers_on(Layer::Overlay) {
+        if !matches!(
+            surface.namespace(),
+            "asher-quick-settings" | "asher-date-center"
+        ) {
+            continue;
+        }
+        if !surface_accepts_input(surface) {
+            continue;
+        }
+        has_transient = true;
+        let Some(geometry) = layer_map.layer_geometry(surface) else {
+            continue;
+        };
+        if point_in_rect(point, geometry.loc, geometry.size) {
+            return false;
+        }
+    }
+    has_transient
 }
 
 pub fn render_targets(
@@ -155,16 +182,7 @@ pub fn render_surfaces(output: &Output, layer: Layer) -> Vec<LayerRenderSurface>
 const DOCK_BLUR_HEIGHT: i32 = 50;
 const DOCK_BLUR_RADIUS: i32 = 18;
 const TASKBAR_BLUR_HEIGHT: i32 = 48;
-const POPOVER_RIGHT_MARGIN: i32 = 12;
-const POPOVER_TOP_MARGIN: i32 = 42;
-const POPOVER_TASKBAR_BOTTOM_MARGIN: i32 = TASKBAR_BLUR_HEIGHT + 8;
-const QUICK_SETTINGS_BLUR_WIDTH: i32 = 420;
-const QUICK_SETTINGS_BLUR_HEIGHT: i32 = 230;
-const DATE_CENTER_BLUR_WIDTH: i32 = 360;
-const DATE_CENTER_BLUR_HEIGHT: i32 = 470;
-const MATERIAL_FULL_BLUR_ALPHA: f32 = 120.0;
-const MATERIAL_VISIBLE_ALPHA_FLOOR: f32 = 4.0;
-
+const QUICK_SETTINGS_OVERFLOW_BOTTOM: i32 = 40;
 #[derive(Debug, Clone)]
 pub struct LayerPointerFocus {
     pub surface: WlSurface,
@@ -230,7 +248,7 @@ fn material_geometry(
     namespace: &str,
     location: Point<i32, Logical>,
     size: smithay::utils::Size<i32, Logical>,
-    panel_taskbar: bool,
+    _panel_taskbar: bool,
 ) -> (Point<i32, Logical>, smithay::utils::Size<i32, Logical>) {
     if namespace == "asher-panel" && size.h > TASKBAR_BLUR_HEIGHT {
         let vertical_inset = (size.h - TASKBAR_BLUR_HEIGHT).max(0);
@@ -241,23 +259,14 @@ fn material_geometry(
     }
 
     if namespace == "asher-quick-settings" {
-        return popover_material_geometry(
+        return (
             location,
-            size,
-            QUICK_SETTINGS_BLUR_WIDTH,
-            QUICK_SETTINGS_BLUR_HEIGHT,
-            panel_taskbar,
+            (size.w, (size.h - QUICK_SETTINGS_OVERFLOW_BOTTOM).max(1)).into(),
         );
     }
 
     if namespace == "asher-date-center" {
-        return popover_material_geometry(
-            location,
-            size,
-            DATE_CENTER_BLUR_WIDTH,
-            DATE_CENTER_BLUR_HEIGHT,
-            panel_taskbar,
-        );
+        return (location, size);
     }
 
     if namespace != "asher-dock" || size.h <= DOCK_BLUR_HEIGHT {
@@ -273,14 +282,10 @@ fn material_geometry(
 
 fn material_opacity(
     surface: &WlSurface,
-    location: Point<i32, Logical>,
-    size: smithay::utils::Size<i32, Logical>,
+    _location: Point<i32, Logical>,
+    _size: smithay::utils::Size<i32, Logical>,
 ) -> f32 {
-    let alpha = surface_alpha_multiplier(surface);
-    alpha
-        * sampled_surface_opacity(surface, location, size)
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0)
+    surface_alpha_multiplier(surface).clamp(0.0, 1.0)
 }
 
 fn surface_alpha_multiplier(surface: &WlSurface) -> f32 {
@@ -293,96 +298,9 @@ fn surface_alpha_multiplier(surface: &WlSurface) -> f32 {
     })
 }
 
-fn sampled_surface_opacity(
-    surface: &WlSurface,
-    location: Point<i32, Logical>,
-    size: smithay::utils::Size<i32, Logical>,
-) -> Option<f32> {
-    let buffer = compositor::with_states(surface, |states| {
-        let mut attributes = states.cached_state.get::<SurfaceAttributes>();
-        match attributes.current().buffer.as_ref()? {
-            BufferAssignment::NewBuffer(buffer) => Some(buffer.clone()),
-            BufferAssignment::Removed => None,
-        }
-    })?;
-
-    shm::with_buffer_contents(&buffer, |ptr, len, data| {
-        sample_argb8888_material_opacity(ptr, len, data, location, size)
-    })
-    .ok()
-    .flatten()
-}
-
-fn sample_argb8888_material_opacity(
-    ptr: *const u8,
-    len: usize,
-    data: shm::BufferData,
-    location: Point<i32, Logical>,
-    size: smithay::utils::Size<i32, Logical>,
-) -> Option<f32> {
-    if data.format != smithay::reexports::wayland_server::protocol::wl_shm::Format::Argb8888 {
-        return None;
-    }
-    let left = location.x.clamp(0, data.width.saturating_sub(1));
-    let top = location.y.clamp(0, data.height.saturating_sub(1));
-    let right = (location.x + size.w).clamp(left + 1, data.width);
-    let bottom = (location.y + size.h).clamp(top + 1, data.height);
-    let sample_columns = 20.min((right - left).max(1));
-    let sample_rows = 20.min((bottom - top).max(1));
-    let mut alpha_total = 0_u32;
-    let mut samples = 0_u32;
-
-    for row in 0..sample_rows {
-        let y = top + ((bottom - top - 1) * row / sample_rows.max(1));
-        for column in 0..sample_columns {
-            let x = left + ((right - left - 1) * column / sample_columns.max(1));
-            let offset = data.offset as isize + (y * data.stride + x * 4 + 3) as isize;
-            if offset < 0 || offset as usize >= len {
-                continue;
-            }
-            let alpha = unsafe { ptr.offset(offset).read() };
-            alpha_total += u32::from(alpha);
-            samples += 1;
-        }
-    }
-
-    if samples == 0 {
-        return None;
-    }
-    Some(material_blur_opacity(alpha_total as f32 / samples as f32))
-}
-
-fn material_blur_opacity(average_alpha: f32) -> f32 {
-    if average_alpha <= MATERIAL_VISIBLE_ALPHA_FLOOR {
-        return 0.0;
-    }
-    let opacity = (average_alpha / MATERIAL_FULL_BLUR_ALPHA).clamp(0.0, 1.0);
-    opacity * opacity
-}
-
-fn popover_material_geometry(
-    location: Point<i32, Logical>,
-    size: smithay::utils::Size<i32, Logical>,
-    preferred_width: i32,
-    preferred_height: i32,
-    panel_taskbar: bool,
-) -> (Point<i32, Logical>, smithay::utils::Size<i32, Logical>) {
-    let width = preferred_width.min(size.w).max(1);
-    let vertical_margin = if panel_taskbar {
-        POPOVER_TASKBAR_BOTTOM_MARGIN
-    } else {
-        POPOVER_TOP_MARGIN
-    };
-    let available_height = (size.h - vertical_margin).max(1);
-    let height = preferred_height.min(available_height).max(1);
-    let x = location.x + (size.w - width - POPOVER_RIGHT_MARGIN).max(0);
-    let y = if panel_taskbar {
-        location.y + (size.h - height - POPOVER_TASKBAR_BOTTOM_MARGIN).max(0)
-    } else {
-        location.y + POPOVER_TOP_MARGIN.min((size.h - height).max(0))
-    };
-
-    ((x, y).into(), (width, height).into())
+fn surface_accepts_input(surface: &LayerSurface) -> bool {
+    surface_alpha_multiplier(surface.wl_surface()) > 0.01
+        && !bbox_from_surface_tree(surface.wl_surface(), (0, 0)).is_empty()
 }
 
 fn pointer_focus_on_layer(
@@ -392,6 +310,9 @@ fn pointer_focus_on_layer(
 ) -> Option<LayerPointerFocus> {
     let layer_map = layer_map_for_output(output);
     let layer_surface = layer_map.layer_under(layer, point)?;
+    if !surface_accepts_input(layer_surface) {
+        return None;
+    }
     let geometry = layer_map.layer_geometry(layer_surface)?;
     let point_in_layer: Point<f64, Logical> = (
         point.x - f64::from(geometry.loc.x),
@@ -405,4 +326,15 @@ fn pointer_focus_on_layer(
         surface,
         location: (geometry.loc + surface_location).to_f64(),
     })
+}
+
+fn point_in_rect(
+    point: Point<f64, Logical>,
+    location: Point<i32, Logical>,
+    size: smithay::utils::Size<i32, Logical>,
+) -> bool {
+    point.x >= f64::from(location.x)
+        && point.y >= f64::from(location.y)
+        && point.x < f64::from(location.x + size.w)
+        && point.y < f64::from(location.y + size.h)
 }

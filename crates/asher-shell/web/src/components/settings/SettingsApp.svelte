@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { applySettings, initialSettingsPage, loadSettings, pickWallpaper, startWindowDrag, windowControl } from "../../settings/bridge";
+  import { applySettings, initialSettingsPage, loadSettings, pickWallpaper, windowControl } from "../../settings/bridge";
   import { emptySettingsSnapshot, type SettingsPage, type SettingsPatch, type SettingsSnapshot } from "../../settings/model";
   import Icon from "../Icon.svelte";
   import AboutPage from "./pages/AboutPage.svelte";
@@ -108,14 +108,6 @@
     return pages.some((page) => page.id === value) ? (value as SettingsPage) : "appearance";
   }
 
-  function sidebarPointerdown(event: PointerEvent) {
-    if (event.button !== 0) return;
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest("button,input")) return;
-    event.preventDefault();
-    startWindowDrag();
-  }
-
   function keydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       windowControl("close");
@@ -148,7 +140,7 @@
   style:--settings-glass-dock={settings.palette.dock}
   style:--settings-glass-blur-image={glassBlurImage}
 >
-  <aside class="settings-sidebar" data-effect="translucent" onpointerdown={sidebarPointerdown}>
+  <aside class="settings-sidebar" data-effect="translucent">
     <div class="settings-window-controls">
       <button type="button" class="settings-window-control" aria-label="Close" onclick={() => windowControl("close")}>
         <Icon name="close" />

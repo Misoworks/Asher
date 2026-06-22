@@ -1,4 +1,5 @@
 use super::model::WebShellSurface;
+use super::surface_sizing::QUICK_SETTINGS_OVERFLOW_BOTTOM;
 use fenestra_cef::{
     ShellSurfaceAnchor, ShellSurfaceKeyboardInteractivity, ShellSurfaceLayer, ShellSurfaceMargin,
     ShellSurfaceOptions,
@@ -80,10 +81,7 @@ pub(crate) fn shell_surface(
         .anchor(anchor(kind, panel_taskbar, dock_menu_x))
         .margin(margin(kind, size, panel_taskbar, dock_menu_x))
         .keyboard_interactivity(keyboard_interactivity(kind));
-    if !matches!(
-        kind,
-        WebShellSurface::Overview | WebShellSurface::QuickSettings | WebShellSurface::DateCenter
-    ) {
+    if !matches!(kind, WebShellSurface::Overview) {
         let (width, height) = shell_size(kind, size, panel_taskbar);
         shell_surface = shell_surface.size(width, height);
     }
@@ -129,7 +127,12 @@ fn anchor(
         WebShellSurface::DockMenu if panel_taskbar => ShellSurfaceAnchor::BOTTOM,
         WebShellSurface::DockMenu => ShellSurfaceAnchor::BOTTOM,
         WebShellSurface::Sidebar => ShellSurfaceAnchor::LEFT | vertical_anchor(),
-        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => ShellSurfaceAnchor::ALL,
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter if panel_taskbar => {
+            ShellSurfaceAnchor::BOTTOM | ShellSurfaceAnchor::RIGHT
+        }
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
+            ShellSurfaceAnchor::TOP | ShellSurfaceAnchor::RIGHT
+        }
         WebShellSurface::NotificationToast if panel_taskbar => {
             ShellSurfaceAnchor::BOTTOM | ShellSurfaceAnchor::RIGHT
         }
@@ -153,7 +156,18 @@ fn margin(
             dock_menu_left_margin(size.0, dock_menu_x),
         ),
         WebShellSurface::DockMenu => ShellSurfaceMargin::new(0, 0, 84, 0),
-        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => zero_margin(),
+        WebShellSurface::QuickSettings if panel_taskbar => ShellSurfaceMargin::new(
+            0,
+            12,
+            (TASKBAR_HEIGHT + 8 - QUICK_SETTINGS_OVERFLOW_BOTTOM).max(0),
+            0,
+        ),
+        WebShellSurface::DateCenter if panel_taskbar => {
+            ShellSurfaceMargin::new(0, 12, TASKBAR_HEIGHT + 8, 0)
+        }
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
+            ShellSurfaceMargin::new(PANEL_HEIGHT + 8, 12, 0, 0)
+        }
         WebShellSurface::NotificationToast if panel_taskbar => {
             ShellSurfaceMargin::new(0, 12, TASKBAR_HEIGHT + 12, 0)
         }

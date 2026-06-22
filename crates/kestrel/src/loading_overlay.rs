@@ -14,6 +14,7 @@ use smithay::{
 
 const WIDTH: i32 = 96;
 const HEIGHT: i32 = 96;
+const SPINNER_SAMPLES: i32 = 4;
 const TAU: f64 = std::f64::consts::PI * 2.0;
 
 pub fn render_loading_overlay(
@@ -57,33 +58,44 @@ pub fn loading_overlay_geometry(output_size: Size<i32, Physical>) -> Rectangle<i
 }
 
 fn draw_spinner(pixels: &mut [u8], phase: f32) {
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let mut alpha = 0.0;
+            for sample_y in 0..SPINNER_SAMPLES {
+                for sample_x in 0..SPINNER_SAMPLES {
+                    let px = x as f64 + (sample_x as f64 + 0.5) / f64::from(SPINNER_SAMPLES);
+                    let py = y as f64 + (sample_y as f64 + 0.5) / f64::from(SPINNER_SAMPLES);
+                    alpha += spinner_alpha(px, py, phase);
+                }
+            }
+            let samples = f64::from(SPINNER_SAMPLES * SPINNER_SAMPLES);
+            let alpha = (alpha / samples * 236.0).round() as u8;
+            write_pixel(pixels, x, y, Rgba::new(255, 255, 255, alpha));
+        }
+    }
+}
+
+fn spinner_alpha(x: f64, y: f64, phase: f32) -> f64 {
     let center = (WIDTH as f64 - 1.0) * 0.5;
     let radius = 18.0;
     let thickness = 3.0;
     let head = f64::from(phase.rem_euclid(1.0)) * TAU;
     let length = TAU * 0.72;
-
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
-            let dx = x as f64 + 0.5 - center;
-            let dy = y as f64 + 0.5 - center;
-            let distance = (dx * dx + dy * dy).sqrt();
-            let ring = ((thickness * 0.5 + 0.75) - (distance - radius).abs()).clamp(0.0, 1.0);
-            if ring <= 0.0 {
-                continue;
-            }
-
-            let angle = dy.atan2(dx).rem_euclid(TAU);
-            let tail = (head - angle).rem_euclid(TAU);
-            if tail > length {
-                continue;
-            }
-
-            let fade = (1.0 - tail / length).powf(0.7);
-            let alpha = (ring * fade * 236.0).round() as u8;
-            write_pixel(pixels, x, y, Rgba::new(255, 255, 255, alpha));
-        }
+    let dx = x - center;
+    let dy = y - center;
+    let distance = (dx * dx + dy * dy).sqrt();
+    let ring = ((thickness * 0.5 + 0.75) - (distance - radius).abs()).clamp(0.0, 1.0);
+    if ring <= 0.0 {
+        return 0.0;
     }
+
+    let angle = dy.atan2(dx).rem_euclid(TAU);
+    let tail = (head - angle).rem_euclid(TAU);
+    if tail > length {
+        return 0.0;
+    }
+
+    ring * (1.0 - tail / length).powf(0.7)
 }
 
 #[derive(Debug, Clone, Copy)]

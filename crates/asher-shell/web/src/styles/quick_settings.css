@@ -1,5 +1,6 @@
 .quick-settings {
   --popover-width: 420px;
+  height: calc(100% - 40px);
   position: relative;
   display: grid;
   align-content: start;

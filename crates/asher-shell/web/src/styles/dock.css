@@ -28,8 +28,6 @@
   padding: 4px 11px 6px;
   border-radius: 14px;
   background: var(--material-dock);
-  -webkit-backdrop-filter: blur(42px) saturate(1.16);
-  backdrop-filter: blur(42px) saturate(1.16);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--accent), transparent 84%),
     inset 0 0 0 1px rgba(255, 255, 255, 0.035),

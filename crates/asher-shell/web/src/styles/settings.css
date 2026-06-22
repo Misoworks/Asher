@@ -1,8 +1,8 @@
 .settings-shell {
-  --settings-content: color-mix(in srgb, var(--settings-glass-sidebar, rgba(22, 22, 20, 0.42)), rgba(10, 10, 9, 0.26) 42%);
-  --settings-surface: color-mix(in srgb, var(--settings-glass-sidebar, rgba(22, 22, 20, 0.48)), rgba(255, 255, 255, 0.04) 18%);
-  --settings-control: color-mix(in srgb, var(--settings-glass-control, rgba(255, 255, 255, 0.08)), rgba(10, 10, 9, 0.16) 34%);
-  --settings-control-hover: color-mix(in srgb, var(--settings-glass-control, rgba(255, 255, 255, 0.12)), rgba(255, 255, 255, 0.07) 30%);
+  --settings-content: #111110;
+  --settings-surface: #1a1a18;
+  --settings-control: #252522;
+  --settings-control-hover: #31312e;
   --settings-sidebar-solid: rgba(17, 17, 15, 0.14);
   --settings-sidebar-tint: color-mix(in srgb, var(--settings-glass-sidebar, rgba(22, 22, 20, 0.34)), transparent 12%);
   --settings-sidebar-overlay: rgba(10, 10, 9, 0.06);
@@ -167,8 +167,6 @@
   overflow: hidden;
   border-radius: 0 18px 18px 0;
   background: var(--settings-content);
-  -webkit-backdrop-filter: blur(34px) saturate(1.16);
-  backdrop-filter: blur(34px) saturate(1.16);
 }
 
 .settings-titlebar {

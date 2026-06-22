@@ -5,7 +5,10 @@ use crate::{
     background::Background,
     background_effect,
     client::ClientState,
-    damage::{DamageTracker, blur_damage_elements, damage_area, damage_elements},
+    damage::{
+        DamageTracker, blur_damage_elements, damage_area, damage_elements,
+        expand_damage_for_blur_targets,
+    },
     debug_overlay::{DebugOverlayCache, DebugOverlayStats, render_debug_overlay},
     frame_clock::{FrameClock, send_surface_frame_tree},
     input::handle_input_event,
@@ -288,6 +291,10 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             let bottom_layer =
                 render_stage_elements(renderer, &state, RenderStage::Layer(Layer::Bottom));
             let window_effect_targets = background_effect::window_blur_targets(&state);
+            let blur_targets_active = !window_effect_targets.is_empty()
+                || !top_targets.is_empty()
+                || !overlay_targets.is_empty();
+            let blur_needs_full_buffer = blur_enabled && blur_targets_active && buffer_age > 1;
             if blur_enabled {
                 let mut blur_targets = window_effect_targets.clone();
                 blur_targets.extend(top_targets.iter().cloned());
@@ -368,7 +375,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                 damage_tracker.plan(
                     output.size,
                     buffer_age,
-                    force_full_damage || blur_animating,
+                    force_full_damage || blur_animating || blur_needs_full_buffer,
                     &damage_elements,
                 )
             };
@@ -378,15 +385,25 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                     &background_layer,
                     &bottom_layer,
                     &windows,
+                    &top_layer,
                 );
                 blur_damage_tracker.plan(
                     output.size,
                     buffer_age,
-                    force_full_damage || blur_animating,
+                    force_full_damage || blur_animating || blur_needs_full_buffer,
                     &blur_damage_elements,
                 )
             };
-            let damage = damage_plan.rectangles.clone();
+            let damage = if blur_enabled {
+                expand_damage_for_blur_targets(
+                    output.size,
+                    &damage_plan.rectangles,
+                    &blur_damage_plan.rectangles,
+                    &[&window_effect_targets, &top_targets, &overlay_targets],
+                )
+            } else {
+                damage_plan.rectangles.clone()
+            };
             let blur_damage = blur_damage_plan.rectangles.clone();
             previous_damage_area = damage_area(&damage);
             if !damage.is_empty() {
@@ -417,8 +434,6 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                 )?;
                 rendered = true;
             }
-            damage_tracker.record(damage_plan);
-            blur_damage_tracker.record(blur_damage_plan);
         }
 
         if rendered {
