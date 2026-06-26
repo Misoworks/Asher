@@ -60,7 +60,14 @@ pub fn build_blur_patch_for_material(
 }
 
 fn blur_downscale(width: i32, height: i32) -> i32 {
-    if width * height >= 120_000 { 8 } else { 6 }
+    let area = width.saturating_mul(height);
+    if area >= 420_000 {
+        12
+    } else if area >= 120_000 {
+        10
+    } else {
+        7
+    }
 }
 
 fn div_ceil(value: i32, divisor: i32) -> i32 {
@@ -189,6 +196,15 @@ fn material_coverage(material: LayerMaterial, x: i32, y: i32, width: i32, height
 }
 
 fn round_rect_coverage(x: i32, y: i32, width: i32, height: i32, radius: i32) -> f32 {
+    let radius = radius.max(0).min(width / 2).min(height / 2);
+    if radius == 0 {
+        return 1.0;
+    }
+
+    if (x >= radius && x < width - radius) || (y >= radius && y < height - radius) {
+        return 1.0;
+    }
+
     const SAMPLES: [(f64, f64); 16] = [
         (0.125, 0.125),
         (0.375, 0.125),
@@ -207,7 +223,7 @@ fn round_rect_coverage(x: i32, y: i32, width: i32, height: i32, radius: i32) -> 
         (0.625, 0.875),
         (0.875, 0.875),
     ];
-    let radius = radius.max(0).min(width / 2).min(height / 2) as f64;
+    let radius = radius as f64;
     let hits = SAMPLES
         .iter()
         .filter(|(sx, sy)| inside_round_rect(x as f64 + sx, y as f64 + sy, width, height, radius))

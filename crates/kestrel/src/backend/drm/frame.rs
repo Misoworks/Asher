@@ -277,7 +277,6 @@ impl SessionFrameRenderer {
                 &background_layer,
                 &bottom_layer,
                 &windows,
-                &top_layer,
             );
             self.blur_damage_tracker.plan(
                 state.output_size(),

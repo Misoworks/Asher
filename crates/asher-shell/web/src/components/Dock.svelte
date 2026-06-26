@@ -69,7 +69,7 @@
   }
 </script>
 
-<section class="dock-shell" class:is-chrome-hidden={snapshot.chromeHidden}>
+<section class="dock-shell">
   <nav class="shell-dock" aria-label="Pinned applications" onwheel={workspaceScroll}>
     {#each orderedApps as app (app.command)}
       <AppButton

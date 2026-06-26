@@ -245,7 +245,7 @@ impl Default for DefaultAppsConfig {
     fn default() -> Self {
         Self {
             terminal: "ghostty".to_string(),
-            file_manager: "nautilus".to_string(),
+            file_manager: "rover".to_string(),
             browser: "google-chrome-stable".to_string(),
             settings: "asher-settings".to_string(),
             launcher: "vicinae".to_string(),

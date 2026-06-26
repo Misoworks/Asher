@@ -58,9 +58,9 @@ pub fn has_shell_surface(output: &Output) -> bool {
         "asher-dock-menu",
         "asher-date-center",
         "asher-launcher",
-        "asher-overview",
         "asher-quick-settings",
         "asher-sidebar",
+        "asher-start-menu",
         "asher-notifications",
     ];
 
@@ -110,7 +110,7 @@ pub fn should_close_transient_popover(output: &Output, point: Point<f64, Logical
     for surface in layer_map.layers_on(Layer::Overlay) {
         if !matches!(
             surface.namespace(),
-            "asher-quick-settings" | "asher-date-center"
+            "asher-quick-settings" | "asher-date-center" | "asher-start-menu"
         ) {
             continue;
         }
@@ -182,7 +182,6 @@ pub fn render_surfaces(output: &Output, layer: Layer) -> Vec<LayerRenderSurface>
 const DOCK_BLUR_HEIGHT: i32 = 50;
 const DOCK_BLUR_RADIUS: i32 = 18;
 const TASKBAR_BLUR_HEIGHT: i32 = 48;
-const QUICK_SETTINGS_OVERFLOW_BOTTOM: i32 = 40;
 #[derive(Debug, Clone)]
 pub struct LayerPointerFocus {
     pub surface: WlSurface,
@@ -239,6 +238,7 @@ fn material_for(namespace: &str) -> Option<LayerMaterial> {
         "asher-launcher" => Some(LayerMaterial::RoundRect { radius: 22 }),
         "asher-quick-settings" => Some(LayerMaterial::RoundRect { radius: 26 }),
         "asher-sidebar" => Some(LayerMaterial::Rect),
+        "asher-start-menu" => Some(LayerMaterial::RoundRect { radius: 24 }),
         "asher-notifications" => Some(LayerMaterial::RoundRect { radius: 18 }),
         _ => None,
     }
@@ -258,14 +258,7 @@ fn material_geometry(
         );
     }
 
-    if namespace == "asher-quick-settings" {
-        return (
-            location,
-            (size.w, (size.h - QUICK_SETTINGS_OVERFLOW_BOTTOM).max(1)).into(),
-        );
-    }
-
-    if namespace == "asher-date-center" {
+    if namespace == "asher-quick-settings" || namespace == "asher-date-center" {
         return (location, size);
     }
 

@@ -24,8 +24,6 @@
   const notificationCount = $derived(snapshot.notifications.length);
   const groups = $derived(notificationGroups(snapshot.notifications));
   const monthLabel = $derived(month.toLocaleDateString([], { month: "long", year: "numeric" }));
-  const todayLabel = $derived(today.toLocaleDateString([], { weekday: "long" }));
-  const todayFull = $derived(today.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" }));
   const activeDay = $derived(selectedDay ?? calendarKey(today));
 
   function scrollMonth(event: WheelEvent) {
@@ -297,11 +295,6 @@
   </section>
 
   <aside class="calendar" aria-label="Calendar" onwheel={scrollMonth}>
-    <header class="calendar-header">
-      <span>{todayLabel}</span>
-      <strong>{todayFull}</strong>
-    </header>
-
     {#key monthLabel}
       <div class="calendar-month">
         <button type="button" class="calendar-nav" aria-label="Previous month" onclick={previousMonth}>

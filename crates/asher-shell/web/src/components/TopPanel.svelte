@@ -14,7 +14,7 @@
   }
 </script>
 
-<section class="shell-panel" class:is-chrome-hidden={snapshot.chromeHidden} onwheel={workspaceScroll}>
+<section class="shell-panel" onwheel={workspaceScroll}>
   <div class="panel-spacer"></div>
   <button
     type="button"

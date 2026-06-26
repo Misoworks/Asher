@@ -4,7 +4,19 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
+
+const APPLICATION_CACHE_TTL: Duration = Duration::from_secs(3);
+static APPLICATION_CACHE: OnceLock<Mutex<ApplicationCache>> = OnceLock::new();
+
+#[derive(Default)]
+struct ApplicationCache {
+    entries: Vec<AppEntry>,
+    scanned_at: Option<Instant>,
+    terminal: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct AppEntry {
@@ -16,6 +28,16 @@ pub struct AppEntry {
 }
 
 pub fn discover_applications(config: &AsherConfig) -> Vec<AppEntry> {
+    let cache = APPLICATION_CACHE.get_or_init(|| Mutex::new(ApplicationCache::default()));
+    if let Ok(cache) = cache.lock()
+        && cache
+            .scanned_at
+            .is_some_and(|scanned_at| scanned_at.elapsed() < APPLICATION_CACHE_TTL)
+        && cache.terminal == config.default_apps.terminal
+    {
+        return cache.entries.clone();
+    }
+
     let mut entries = BTreeMap::new();
 
     for dir in xdg::data_dirs() {
@@ -23,7 +45,13 @@ pub fn discover_applications(config: &AsherConfig) -> Vec<AppEntry> {
         collect_desktop_entries(&applications, config, &mut entries);
     }
 
-    entries.into_values().collect()
+    let entries = entries.into_values().collect::<Vec<_>>();
+    if let Ok(mut cache) = cache.lock() {
+        cache.entries.clone_from(&entries);
+        cache.scanned_at = Some(Instant::now());
+        cache.terminal.clone_from(&config.default_apps.terminal);
+    }
+    entries
 }
 
 fn collect_desktop_entries(

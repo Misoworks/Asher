@@ -96,6 +96,11 @@ pub fn minimize_window(window: WindowId) -> Result<ShellModel, Box<dyn Error>> {
     load_model()
 }
 
+pub fn close_window(window: WindowId) -> Result<ShellModel, Box<dyn Error>> {
+    send_accepted(IpcRequest::CloseWindow { window })?;
+    load_model()
+}
+
 pub fn move_window_to_workspace(
     window: WindowId,
     workspace: WorkspaceId,

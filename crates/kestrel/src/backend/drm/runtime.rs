@@ -121,6 +121,7 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         state.xwayland_display.as_deref(),
         ipc.path(),
         &shell_control_socket,
+        state.output_refresh_millihertz(),
         recovery.clone(),
     );
     state.shell_status = shell.status();

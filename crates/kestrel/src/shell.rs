@@ -14,6 +14,7 @@ const NORMAL_RESTART_DELAY: Duration = Duration::from_millis(500);
 const SAFE_MODE_RESTART_DELAY: Duration = Duration::from_secs(2);
 const PRIVATE_DBUS_ENV: &str = "ASHER_PRIVATE_DBUS";
 const USE_HOST_DBUS_ENV: &str = "ASHER_USE_HOST_DBUS";
+const OUTPUT_REFRESH_ENV: &str = "ASHER_OUTPUT_REFRESH_MILLIHERTZ";
 
 #[derive(Debug)]
 pub struct ShellProcess {
@@ -23,6 +24,7 @@ pub struct ShellProcess {
     x11_display: Option<String>,
     ipc_socket: PathBuf,
     shell_socket: PathBuf,
+    output_refresh_millihertz: i32,
     recovery: RecoveryPolicy,
     crashes: VecDeque<Instant>,
     next_spawn_after: Option<Instant>,
@@ -35,6 +37,7 @@ impl ShellProcess {
         x11_display: Option<&str>,
         ipc_socket: &Path,
         shell_socket: &Path,
+        output_refresh_millihertz: i32,
         recovery: RecoveryPolicy,
     ) -> Self {
         if let Err(error) = ensure_dev_shell_built() {
@@ -53,6 +56,7 @@ impl ShellProcess {
             x11_display: x11_display.map(str::to_string),
             ipc_socket: ipc_socket.to_path_buf(),
             shell_socket: shell_socket.to_path_buf(),
+            output_refresh_millihertz,
             recovery,
             crashes: VecDeque::new(),
             next_spawn_after: None,
@@ -142,6 +146,10 @@ impl ShellProcess {
             .env("GTK_A11Y", "none")
             .env("GTK_MODULES", "")
             .env(PRIVATE_DBUS_ENV, "1")
+            .env(
+                OUTPUT_REFRESH_ENV,
+                self.output_refresh_millihertz.max(1).to_string(),
+            )
             .env(SOCKET_ENV, &self.ipc_socket)
             .env(SHELL_SOCKET_ENV, &self.shell_socket);
         if self.default_config {

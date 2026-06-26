@@ -8,7 +8,7 @@ pub enum WebShellAction {
     LaunchDefaultApp {
         app: asher_ipc::DefaultAppKind,
     },
-    ToggleOverview,
+    ToggleStartMenu,
     ToggleQuickSettings,
     ToggleDateCenter,
     WorkspaceSwitch {
@@ -22,6 +22,12 @@ pub enum WebShellAction {
         profile: String,
     },
     WindowActivate {
+        window: u64,
+    },
+    WindowClose {
+        window: u64,
+    },
+    WindowMinimize {
         window: u64,
     },
     WindowMove {
@@ -42,6 +48,9 @@ pub enum WebShellAction {
         icon: Option<String>,
     },
     DockUnpin {
+        command: String,
+    },
+    DockForceQuit {
         command: String,
     },
     DockReorder {

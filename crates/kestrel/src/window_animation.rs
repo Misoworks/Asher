@@ -129,16 +129,10 @@ impl WindowAnimation {
             }
             WindowAnimationKind::Geometry { from } => {
                 let progress = ease_out(self.raw_progress(GEOMETRY_DURATION));
-                let rect = interpolate_rect(from, bounds, progress);
-                let scale = if bounds.width <= 0 {
-                    1.0
-                } else {
-                    rect.width as f64 / bounds.width as f64
-                };
                 WindowTransform {
-                    x: rect.x as f64,
-                    y: rect.y as f64,
-                    scale,
+                    x: lerp(from.x as f64, bounds.x as f64, progress),
+                    y: lerp(from.y as f64, bounds.y as f64, progress),
+                    scale: 1.0,
                     alpha: 1.0,
                 }
             }
@@ -194,19 +188,6 @@ fn scale_around_center(bounds: Rect, scale: f64) -> WindowTransform {
         scale,
         alpha: 1.0,
     }
-}
-
-fn interpolate_rect(from: Rect, to: Rect, progress: f64) -> Rect {
-    Rect::new(
-        lerp(from.x as f64, to.x as f64, progress).round() as i32,
-        lerp(from.y as f64, to.y as f64, progress).round() as i32,
-        lerp(from.width as f64, to.width as f64, progress)
-            .round()
-            .max(1.0) as i32,
-        lerp(from.height as f64, to.height as f64, progress)
-            .round()
-            .max(1.0) as i32,
-    )
 }
 
 fn ease_out(progress: f64) -> f64 {

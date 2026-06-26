@@ -142,7 +142,7 @@ pub enum IpcRequest {
 pub enum ShellControlRequest {
     LaunchDefaultApp { app: DefaultAppKind },
     OpenLauncher,
-    ToggleOverview,
+    ToggleStartMenu,
     CloseTransientPopovers,
 }
 

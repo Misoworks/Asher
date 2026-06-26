@@ -1,5 +1,4 @@
 use super::model::WebShellSurface;
-use super::surface_sizing::QUICK_SETTINGS_OVERFLOW_BOTTOM;
 use fenestra_cef::{
     ShellSurfaceAnchor, ShellSurfaceKeyboardInteractivity, ShellSurfaceLayer, ShellSurfaceMargin,
     ShellSurfaceOptions,
@@ -9,7 +8,7 @@ pub(crate) const PANEL_WIDTH_HINT: i32 = 1;
 pub(crate) const PANEL_HEIGHT: i32 = 34;
 
 const TASKBAR_HEIGHT: i32 = 48;
-const TASKBAR_SURFACE_HEIGHT: i32 = 96;
+const TASKBAR_SURFACE_HEIGHT: i32 = 62;
 const DOCK_HEIGHT: i32 = 50;
 const DOCK_ITEM: i32 = 40;
 const DOCK_GAP: i32 = 10;
@@ -27,7 +26,7 @@ impl WebShellSurface {
             Self::QuickSettings => "quick-settings",
             Self::DateCenter => "date-center",
             Self::NotificationToast => "notification-toast",
-            Self::Overview => "overview",
+            Self::StartMenu => "start-menu",
         }
     }
 }
@@ -42,7 +41,7 @@ impl WebShellSurface {
             Self::QuickSettings => "asher-quick-settings",
             Self::DateCenter => "asher-date-center",
             Self::NotificationToast => "asher-notifications",
-            Self::Overview => "asher-overview",
+            Self::StartMenu => "asher-start-menu",
         }
     }
 }
@@ -81,10 +80,8 @@ pub(crate) fn shell_surface(
         .anchor(anchor(kind, panel_taskbar, dock_menu_x))
         .margin(margin(kind, size, panel_taskbar, dock_menu_x))
         .keyboard_interactivity(keyboard_interactivity(kind));
-    if !matches!(kind, WebShellSurface::Overview) {
-        let (width, height) = shell_size(kind, size, panel_taskbar);
-        shell_surface = shell_surface.size(width, height);
-    }
+    let (width, height) = shell_size(kind, size, panel_taskbar);
+    shell_surface = shell_surface.size(width, height);
     if let Some(exclusive_zone) = exclusive_zone(kind, panel_taskbar) {
         shell_surface = shell_surface.exclusive_zone(exclusive_zone);
     }
@@ -95,7 +92,6 @@ fn shell_size(kind: WebShellSurface, size: (i32, i32), panel_taskbar: bool) -> (
     let size = match kind {
         WebShellSurface::Panel => (0, panel_size(panel_taskbar).1),
         WebShellSurface::Sidebar => (size.0, 0),
-        WebShellSurface::Overview => (0, 0),
         _ => size,
     };
     (size.0.max(0) as u32, size.1.max(0) as u32)
@@ -103,11 +99,10 @@ fn shell_size(kind: WebShellSurface, size: (i32, i32), panel_taskbar: bool) -> (
 
 fn layer(kind: WebShellSurface) -> ShellSurfaceLayer {
     match kind {
-        WebShellSurface::Overview
+        WebShellSurface::StartMenu
         | WebShellSurface::DockMenu
-        | WebShellSurface::QuickSettings
-        | WebShellSurface::DateCenter
-        | WebShellSurface::NotificationToast => ShellSurfaceLayer::Overlay,
+        | WebShellSurface::NotificationToast
+        | WebShellSurface::Panel => ShellSurfaceLayer::Overlay,
         _ => ShellSurfaceLayer::Top,
     }
 }
@@ -137,7 +132,7 @@ fn anchor(
             ShellSurfaceAnchor::BOTTOM | ShellSurfaceAnchor::RIGHT
         }
         WebShellSurface::NotificationToast => ShellSurfaceAnchor::TOP | ShellSurfaceAnchor::RIGHT,
-        WebShellSurface::Overview => ShellSurfaceAnchor::ALL,
+        WebShellSurface::StartMenu => ShellSurfaceAnchor::BOTTOM,
     }
 }
 
@@ -156,17 +151,18 @@ fn margin(
             dock_menu_left_margin(size.0, dock_menu_x),
         ),
         WebShellSurface::DockMenu => ShellSurfaceMargin::new(0, 0, 84, 0),
-        WebShellSurface::QuickSettings if panel_taskbar => ShellSurfaceMargin::new(
-            0,
-            12,
-            (TASKBAR_HEIGHT + 8 - QUICK_SETTINGS_OVERFLOW_BOTTOM).max(0),
-            0,
-        ),
+        WebShellSurface::StartMenu if panel_taskbar => {
+            ShellSurfaceMargin::new(0, 0, TASKBAR_HEIGHT + 10, 0)
+        }
+        WebShellSurface::StartMenu => ShellSurfaceMargin::new(0, 0, 84, 0),
+        WebShellSurface::QuickSettings if panel_taskbar => {
+            ShellSurfaceMargin::new(0, 0, TASKBAR_HEIGHT + 8, 0)
+        }
         WebShellSurface::DateCenter if panel_taskbar => {
-            ShellSurfaceMargin::new(0, 12, TASKBAR_HEIGHT + 8, 0)
+            ShellSurfaceMargin::new(0, 0, TASKBAR_HEIGHT + 8, 0)
         }
         WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
-            ShellSurfaceMargin::new(PANEL_HEIGHT + 8, 12, 0, 0)
+            ShellSurfaceMargin::new(PANEL_HEIGHT + 8, 0, 0, 0)
         }
         WebShellSurface::NotificationToast if panel_taskbar => {
             ShellSurfaceMargin::new(0, 12, TASKBAR_HEIGHT + 12, 0)
@@ -210,7 +206,7 @@ fn keyboard_interactivity(kind: WebShellSurface) -> ShellSurfaceKeyboardInteract
         | WebShellSurface::Dock
         | WebShellSurface::Sidebar
         | WebShellSurface::NotificationToast => ShellSurfaceKeyboardInteractivity::None,
-        WebShellSurface::Overview => ShellSurfaceKeyboardInteractivity::Exclusive,
+        WebShellSurface::StartMenu => ShellSurfaceKeyboardInteractivity::OnDemand,
         WebShellSurface::DockMenu
         | WebShellSurface::QuickSettings
         | WebShellSurface::DateCenter => ShellSurfaceKeyboardInteractivity::OnDemand,

@@ -27,7 +27,6 @@ pub struct WebShellSnapshot {
     pub blur_enabled: bool,
     pub debug_overlay: bool,
     pub safe_mode: bool,
-    pub chrome_hidden: bool,
     pub wallpaper_uri: Option<String>,
     pub glass_blur_wallpaper_uri: Option<String>,
     pub palette: WebPalette,
@@ -56,7 +55,7 @@ pub enum WebShellSurface {
     QuickSettings,
     DateCenter,
     NotificationToast,
-    Overview,
+    StartMenu,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -216,7 +215,6 @@ impl WebShellSnapshot {
         palette: ShellPalette,
         config: &AsherConfig,
         safe_mode: bool,
-        chrome_hidden: bool,
     ) -> Self {
         let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
         Self {
@@ -236,7 +234,6 @@ impl WebShellSnapshot {
             blur_enabled: model.blur_enabled,
             debug_overlay: model.debug_overlay,
             safe_mode,
-            chrome_hidden,
             wallpaper_uri,
             glass_blur_wallpaper_uri,
             palette: WebPalette::from(palette),

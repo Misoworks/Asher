@@ -8,6 +8,7 @@ declare global {
     fenestra?: {
       bridge?: NativeBridge;
       window?: NativeWindowControls;
+      popup?: NativePopupControls;
     };
     ipc?: { postMessage: (message: string) => void };
     asherShell?: {
@@ -27,6 +28,17 @@ type NativeWindowControls = {
   minimize?: () => void;
   toggleMaximize?: () => void;
   startDrag?: () => void;
+};
+
+type NativePopupControls = {
+  open?: (options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    html: string;
+  }) => void | Promise<unknown>;
+  close?: () => void | Promise<unknown>;
 };
 
 type NativeReady = {
@@ -157,7 +169,7 @@ function isSurface(value: string | null): value is ShellSurface {
     value === "quick-settings" ||
     value === "date-center" ||
     value === "notification-toast" ||
-    value === "overview" ||
+    value === "start-menu" ||
     value === "settings"
   );
 }

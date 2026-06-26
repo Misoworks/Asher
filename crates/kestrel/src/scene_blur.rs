@@ -17,11 +17,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Buffer, Logical, Physical, Point, Rectangle, Size},
 };
-use std::time::{Duration, Instant};
-
-const BLUR_FADE_IN: Duration = Duration::from_millis(145);
-const BLUR_FADE_OUT: Duration = Duration::from_millis(110);
-const BLUR_FADE_SETTLE: Duration = Duration::from_millis(24);
+use std::time::Instant;
 
 #[derive(Default)]
 pub struct SceneBlurCache {
@@ -34,37 +30,21 @@ impl SceneBlurCache {
     }
 
     pub fn retain_targets(&mut self, targets: &[LayerRenderTarget]) {
-        let now = Instant::now();
         for entry in &mut self.entries {
             if let Some(target) = targets
                 .iter()
                 .find(|target| target.size.w > 1 && target.size.h > 1 && entry.matches(target))
             {
-                entry.removed_at = None;
+                entry.location = target.location;
                 entry.target_opacity = target.opacity;
-            } else if entry.removed_at.is_none() {
-                entry.removed_at = Some(now);
             }
         }
-        self.entries.retain(|entry| {
-            if entry.blur_layer != BlurLayer::Window && entry.removed_at.is_some() {
-                return false;
-            }
-            entry.removed_at.is_none_or(|removed_at| {
-                now.saturating_duration_since(removed_at) <= BLUR_FADE_OUT + BLUR_FADE_SETTLE
-            })
-        });
+        self.entries
+            .retain(|entry| targets.iter().any(|target| entry.matches(target)));
     }
 
     pub fn is_animating(&self) -> bool {
-        let now = Instant::now();
-        self.entries.iter().any(|entry| {
-            if let Some(removed_at) = entry.removed_at {
-                return now.saturating_duration_since(removed_at)
-                    <= BLUR_FADE_OUT + BLUR_FADE_SETTLE;
-            }
-            now.saturating_duration_since(entry.appeared_at) <= BLUR_FADE_IN + BLUR_FADE_SETTLE
-        })
+        false
     }
 
     pub fn has_cached_elements(&self) -> bool {
@@ -89,7 +69,7 @@ impl SceneBlurCache {
         &self,
         renderer: &mut GlesRenderer,
         output_size: Size<i32, Physical>,
-        blur_layer: BlurLayer,
+        _blur_layer: BlurLayer,
         targets: &[LayerRenderTarget],
     ) -> Result<Vec<MemoryRenderBufferRenderElement<GlesRenderer>>, GlesError> {
         let now = Instant::now();
@@ -106,18 +86,6 @@ impl SceneBlurCache {
                 rect,
                 &entry.buffer,
                 entry.opacity(now, target.opacity),
-            )?);
-        }
-
-        for entry in self.fading_entries(blur_layer) {
-            let Some(rect) = clipped_entry_rect(output_size, entry) else {
-                continue;
-            };
-            elements.push(render_element(
-                renderer,
-                rect,
-                &entry.buffer,
-                entry.opacity(now, entry.target_opacity),
             )?);
         }
 
@@ -138,7 +106,7 @@ impl SceneBlurCache {
         if let Some(index) = cached
             && !target_is_damaged(rect, damage)
         {
-            self.entries[index].removed_at = None;
+            self.entries[index].location = target.location;
             self.entries[index].target_opacity = target.opacity;
             let opacity = self.entries[index].opacity(now, target.opacity);
             return Ok((&self.entries[index].buffer, opacity));
@@ -149,7 +117,6 @@ impl SceneBlurCache {
         match cached {
             Some(index) => {
                 self.entries[index].buffer = buffer;
-                self.entries[index].removed_at = None;
                 self.entries[index].target_opacity = target.opacity;
             }
             None => self.entries.push(SceneBlurCacheEntry {
@@ -160,8 +127,6 @@ impl SceneBlurCache {
                 material: target.material,
                 buffer,
                 target_opacity: target.opacity,
-                appeared_at: now,
-                removed_at: None,
             }),
         }
 
@@ -177,12 +142,6 @@ impl SceneBlurCache {
     fn cached_entry(&self, target: &LayerRenderTarget) -> Option<&SceneBlurCacheEntry> {
         self.entries.iter().find(|entry| entry.matches(target))
     }
-
-    fn fading_entries(&self, blur_layer: BlurLayer) -> impl Iterator<Item = &SceneBlurCacheEntry> {
-        self.entries
-            .iter()
-            .filter(move |entry| entry.blur_layer == blur_layer && entry.removed_at.is_some())
-    }
 }
 
 pub fn capture_blur_elements(
@@ -190,7 +149,7 @@ pub fn capture_blur_elements(
     renderer: &mut GlesRenderer,
     framebuffer: &GlesTarget<'_>,
     output_size: Size<i32, Physical>,
-    blur_layer: BlurLayer,
+    _blur_layer: BlurLayer,
     targets: &[LayerRenderTarget],
     damage: &[Rectangle<i32, Physical>],
     enabled: bool,
@@ -209,19 +168,6 @@ pub fn capture_blur_elements(
         elements.push(render_element(renderer, rect, buffer, opacity)?);
     }
 
-    let now = Instant::now();
-    for entry in cache.fading_entries(blur_layer) {
-        let Some(rect) = clipped_entry_rect(output_size, entry) else {
-            continue;
-        };
-        elements.push(render_element(
-            renderer,
-            rect,
-            &entry.buffer,
-            entry.opacity(now, entry.target_opacity),
-        )?);
-    }
-
     Ok(elements)
 }
 
@@ -234,35 +180,19 @@ struct SceneBlurCacheEntry {
     material: LayerMaterial,
     buffer: MemoryRenderBuffer,
     target_opacity: f32,
-    appeared_at: Instant,
-    removed_at: Option<Instant>,
 }
 
 impl SceneBlurCacheEntry {
     fn matches(&self, target: &LayerRenderTarget) -> bool {
         self.surface == target.surface
             && self.blur_layer == target.blur_layer
-            && self.location == target.location
+            && (self.blur_layer != BlurLayer::Window || self.location == target.location)
             && self.size == target.size
             && self.material == target.material
     }
 
-    fn opacity(&self, now: Instant, current_opacity: f32) -> f32 {
-        if let Some(removed_at) = self.removed_at {
-            let progress =
-                duration_progress(now.saturating_duration_since(removed_at), BLUR_FADE_OUT);
-            return (self.target_opacity * (1.0 - progress)).clamp(0.0, 1.0);
-        }
-        (current_opacity
-            * if self.blur_layer == BlurLayer::Window {
-                duration_progress(
-                    now.saturating_duration_since(self.appeared_at),
-                    BLUR_FADE_IN,
-                )
-            } else {
-                1.0
-            })
-        .clamp(0.0, 1.0)
+    fn opacity(&self, _now: Instant, current_opacity: f32) -> f32 {
+        current_opacity.clamp(0.0, 1.0)
     }
 }
 
@@ -271,13 +201,6 @@ fn clipped_target_rect(
     target: &LayerRenderTarget,
 ) -> Option<Rectangle<i32, Physical>> {
     clipped_rect(output_size, target.location, target.size)
-}
-
-fn clipped_entry_rect(
-    output_size: Size<i32, Physical>,
-    entry: &SceneBlurCacheEntry,
-) -> Option<Rectangle<i32, Physical>> {
-    clipped_rect(output_size, entry.location, entry.size)
 }
 
 fn clipped_rect(
@@ -362,11 +285,4 @@ fn blur_patch_from_capture(
         Size::<i32, Logical>::from((size.w, size.h)),
         material,
     )
-}
-
-fn duration_progress(elapsed: Duration, duration: Duration) -> f32 {
-    if duration.is_zero() {
-        return 1.0;
-    }
-    (elapsed.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
 }

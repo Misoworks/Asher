@@ -1,6 +1,6 @@
 # Asher Shell Web UI
 
-The Svelte shell web UI renders panel, dock, sidebar, overview, quick settings, and date center surfaces. Rust owns the compositor-facing state, IPC, app launching, tray, notifications, and surface lifetime. This is the shell chrome implementation, not a fallback beside a native UI.
+The Svelte shell web UI renders panel, dock, sidebar, Start menu, quick settings, and date center surfaces. Rust owns the compositor-facing state, IPC, app launching, tray, notifications, and surface lifetime. This is the shell chrome implementation, not a fallback beside a native UI.
 
 Install dependencies with Bun:
 

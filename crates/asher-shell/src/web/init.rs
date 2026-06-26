@@ -37,7 +37,6 @@ impl WebShell {
             palette,
             &config,
             config.general.safe_mode,
-            false,
         );
         let mut surfaces = WebSurfaces::new(
             actions_tx,
@@ -67,10 +66,9 @@ impl WebShell {
             actions_rx,
             control: ShellControlServer::bind_from_env()?,
             app_processes: Vec::new(),
-            overview_visible: false,
+            start_menu_visible: false,
             quick_visible: false,
             date_visible: false,
-            chrome_visibility: ChromeVisibility::default(),
             dock_menu_open: false,
             dock_menu_command: None,
             dock_menu_x: None,

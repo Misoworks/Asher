@@ -1,6 +1,7 @@
 .quick-settings {
   --popover-width: 420px;
-  height: calc(100% - 40px);
+  height: 100%;
+  contain: layout;
   position: relative;
   display: grid;
   align-content: start;
@@ -321,23 +322,26 @@
 
 .session-actions {
   position: absolute;
-  top: 62px;
-  right: 16px;
-  z-index: 4;
+  top: 58px;
+  right: 14px;
+  z-index: 12;
   display: grid;
-  gap: 6px;
-  width: 184px;
-  padding: 8px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--material-popover), rgba(12, 12, 10, 0.74) 24%);
+  gap: 4px;
+  width: 188px;
+  padding: 6px;
+  border-radius: 18px;
+  background:
+    linear-gradient(rgba(20, 20, 18, 0.64), rgba(20, 20, 18, 0.64)),
+    var(--material-popover);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
-    0 18px 46px rgba(0, 0, 0, 0.28);
+    0 14px 34px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.055);
   opacity: 0;
   pointer-events: none;
   transform: translate3d(0, -5px, 0) scale(0.985);
   transform-origin: top right;
+  will-change: opacity, transform;
   transition:
     opacity 140ms var(--ease-shell),
     transform 160ms var(--ease-shell);
@@ -355,12 +359,13 @@
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  min-height: 42px;
+  min-height: 36px;
   padding: 0 10px 0 6px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.065);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.075);
   transform: translate3d(0, 0, 0) scale(var(--control-scale));
   transform-origin: center;
+  will-change: transform;
   transition:
     background-color 150ms var(--ease-shell),
     opacity 150ms var(--ease-shell),
@@ -409,27 +414,4 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-#app.is-surface-opening[data-surface="quick-settings"] .quick-header,
-#app.is-surface-opening[data-surface="quick-settings"] .setting-tile,
-#app.is-surface-opening[data-surface="quick-settings"] .control-slider {
-  animation: quick-item-in 145ms var(--ease-shell) both;
-}
-
-#app.is-surface-opening[data-surface="quick-settings"] .setting-tile,
-#app.is-surface-opening[data-surface="quick-settings"] .control-slider {
-  animation-delay: calc(var(--index, 0) * 10ms);
-}
-
-@keyframes quick-item-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 8px, 0) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
 }

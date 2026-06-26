@@ -168,7 +168,6 @@ pub struct ChromeSpec {
     pub panel: bool,
     pub dock: bool,
     pub sidebar: bool,
-    pub overview: bool,
     pub command_palette: bool,
 }
 
@@ -178,7 +177,6 @@ impl ChromeSpec {
             panel: true,
             dock: true,
             sidebar: false,
-            overview: true,
             command_palette: true,
         }
     }
@@ -188,7 +186,6 @@ impl ChromeSpec {
             panel: false,
             dock: false,
             sidebar: true,
-            overview: true,
             command_palette: true,
         }
     }

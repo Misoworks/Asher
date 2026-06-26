@@ -121,6 +121,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
         state.xwayland_display.as_deref(),
         ipc.path(),
         &shell_control_socket,
+        output.refresh_millihertz,
         recovery.clone(),
     );
     state.shell_status = shell.status();
@@ -385,7 +386,6 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                     &background_layer,
                     &bottom_layer,
                     &windows,
-                    &top_layer,
                 );
                 blur_damage_tracker.plan(
                     output.size,

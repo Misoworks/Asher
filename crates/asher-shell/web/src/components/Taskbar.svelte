@@ -71,10 +71,10 @@
   }
 </script>
 
-<section class="shell-taskbar" class:is-chrome-hidden={snapshot.chromeHidden} onwheel={workspaceScroll}>
+<section class="shell-taskbar" onwheel={workspaceScroll}>
   <nav class="taskbar-apps" aria-label="Pinned applications">
     {#if snapshot.appearance.taskbarLauncher}
-      <button type="button" class="taskbar-launcher" aria-label="Open overview" onclick={() => sendAction({ type: "toggle-overview" })}>
+      <button type="button" class="taskbar-launcher" aria-label="Open Start menu" onclick={() => sendAction({ type: "toggle-start-menu" })}>
         <Icon name="app" />
       </button>
     {/if}

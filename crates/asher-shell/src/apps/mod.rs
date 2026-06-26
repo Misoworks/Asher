@@ -2,6 +2,7 @@ use crate::dock::DockApp;
 
 mod browser_launch;
 mod desktop_entry;
+mod dev_command;
 mod icon_theme;
 mod xdg;
 
@@ -118,6 +119,7 @@ pub fn launcher_apps(config: &AsherConfig, fallback: &[DockApp]) -> Vec<AppEntry
 
 pub fn spawn_command(command: &str, xwayland_display: Option<&str>) -> io::Result<Child> {
     let command = browser_launch::command_for_shell(command);
+    let command = dev_command::resolve(&command).unwrap_or(command);
     let mut child = command_for_launch(&command);
     apply_app_environment(&mut child, xwayland_display);
     child.spawn()

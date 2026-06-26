@@ -23,7 +23,6 @@ impl ShellProfile {
                 panel: true,
                 dock: false,
                 sidebar: false,
-                overview: true,
                 command_palette: true,
             },
         }

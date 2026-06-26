@@ -1,6 +1,6 @@
 import type { ApplicationItem, ProfileItem, ShellAction, ShellSnapshot, WindowItem, WorkspaceItem } from "../shell/model";
 
-type OverviewCommand = {
+type StartMenuCommand = {
   title: string;
   detail: string;
   icon: string;
@@ -9,7 +9,7 @@ type OverviewCommand = {
   action: ShellAction;
 };
 
-export type OverviewSearchResult =
+export type StartMenuSearchResult =
   | {
       kind: "app";
       key: string;
@@ -58,14 +58,14 @@ export function filteredApplications(snapshot: ShellSnapshot, query: string) {
   );
 }
 
-export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
+export function startMenuSearchResults(snapshot: ShellSnapshot, query: string) {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
 
-  const actions = overviewCommands(snapshot)
+  const actions = startMenuCommands(snapshot)
     .filter((command) => searchable([command.title, command.detail, ...command.keywords], needle))
     .slice(0, 6)
-    .map<OverviewSearchResult>((command) => ({
+    .map<StartMenuSearchResult>((command) => ({
       kind: "action",
       key: `action:${command.title}`,
       title: command.title,
@@ -78,7 +78,7 @@ export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
   const apps = snapshot.applications
     .filter((app) => searchable([app.name, app.comment ?? "", app.command], needle))
     .slice(0, 8)
-    .map<OverviewSearchResult>((app) => ({
+    .map<StartMenuSearchResult>((app) => ({
       kind: "app",
       key: `app:${app.command}`,
       title: app.name,
@@ -90,7 +90,7 @@ export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
   const windows = snapshot.windows
     .filter((window) => window.visible && searchable([window.title, window.appId ?? "", window.workspace], needle))
     .slice(0, 6)
-    .map<OverviewSearchResult>((window) => ({
+    .map<StartMenuSearchResult>((window) => ({
       kind: "window",
       key: `window:${window.id}`,
       title: window.title,
@@ -102,7 +102,7 @@ export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
   const workspaces = snapshot.workspaces
     .filter((workspace) => searchable([workspace.name, workspace.profile, workspace.mode, workspace.id], needle))
     .slice(0, 4)
-    .map<OverviewSearchResult>((workspace) => ({
+    .map<StartMenuSearchResult>((workspace) => ({
       kind: "workspace",
       key: `workspace:${workspace.id}`,
       title: workspace.name,
@@ -113,7 +113,7 @@ export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
   const profiles = snapshot.profiles
     .filter((profile) => searchable([profile.name, profile.id, profile.mode], needle))
     .slice(0, 5)
-    .map<OverviewSearchResult>((profile) => ({
+    .map<StartMenuSearchResult>((profile) => ({
       kind: "profile",
       key: `profile:${profile.id}`,
       title: profile.name,
@@ -124,7 +124,7 @@ export function overviewSearchResults(snapshot: ShellSnapshot, query: string) {
   return [...actions, ...apps, ...windows, ...workspaces, ...profiles];
 }
 
-export function selectedOverviewResult(results: OverviewSearchResult[], selection: number) {
+export function selectedStartMenuResult(results: StartMenuSearchResult[], selection: number) {
   return results[Math.max(0, Math.min(selection, results.length - 1))];
 }
 
@@ -132,7 +132,7 @@ function searchable(values: string[], needle: string) {
   return values.some((value) => value.toLowerCase().includes(needle));
 }
 
-function overviewCommands(snapshot: ShellSnapshot): OverviewCommand[] {
+function startMenuCommands(snapshot: ShellSnapshot): StartMenuCommand[] {
   return [
     {
       title: "Open Launcher",

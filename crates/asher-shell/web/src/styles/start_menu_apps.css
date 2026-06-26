@@ -1,6 +1,6 @@
-.overview-apps {
+.start-menu-apps {
   align-self: stretch;
-  width: min(1900px, calc(100vw - 72px));
+  width: 100%;
   min-height: 0;
   height: 100%;
   margin: 0 auto;
@@ -9,7 +9,7 @@
   touch-action: pan-x;
 }
 
-.overview-app-pages {
+.start-menu-app-pages {
   display: flex;
   width: 100%;
   height: 100%;
@@ -18,47 +18,43 @@
   will-change: transform;
 }
 
-#app.is-surface-opening[data-surface="overview"] .overview-app-pages {
-  animation: overview-pages-in 155ms var(--ease-shell) both;
-}
-
-.overview-app-page {
-  --overview-app-size: clamp(128px, min(9vw, 18vh), 176px);
+.start-menu-app-page {
+  --start-menu-app-size: 82px;
   display: grid;
   flex: 0 0 100%;
-  grid-template-columns: repeat(8, minmax(96px, 1fr));
-  grid-template-rows: repeat(var(--page-rows, 3), minmax(var(--overview-app-size), 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(var(--page-rows, 3), minmax(var(--start-menu-app-size), 1fr));
   align-content: stretch;
   justify-content: center;
   place-items: center;
-  gap: clamp(18px, 2.4vh, 34px) clamp(18px, 1.45vw, 34px);
+  gap: 12px 8px;
   min-width: 0;
   height: 100%;
-  padding: 0 clamp(12px, 2.2vw, 46px);
+  padding: 0 4px;
 }
 
-.overview-app {
+.start-menu-app {
   --control-scale: 1;
-  --overview-app-y: 0px;
+  --start-menu-app-y: 0px;
   position: relative;
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 11px;
-  width: var(--overview-app-size);
-  height: var(--overview-app-size);
+  gap: 8px;
+  width: var(--start-menu-app-size);
+  height: var(--start-menu-app-size);
   min-width: 0;
   min-height: 0;
-  border-radius: 20px;
+  border-radius: 16px;
   text-align: center;
-  transform: translate3d(0, var(--overview-app-y), 0) scale(var(--control-scale));
+  transform: translate3d(0, var(--start-menu-app-y), 0) scale(var(--control-scale));
   transform-origin: center;
   transition:
     background-color 180ms var(--ease-shell),
     transform 180ms var(--ease-shell);
 }
 
-.overview-app.is-pinned::after {
+.start-menu-app.is-pinned::after {
   position: absolute;
   bottom: 6px;
   left: 50%;
@@ -70,35 +66,35 @@
   transform: translateX(-50%);
 }
 
-.overview-app:hover {
-  --overview-app-y: -6px;
+.start-menu-app:hover {
+  --start-menu-app-y: -6px;
   background: rgba(255, 255, 255, 0.1);
 }
 
-.overview-app.is-selected {
+.start-menu-app.is-selected {
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent), white 14%);
 }
 
-.overview-app img,
-.overview-app svg {
-  width: clamp(58px, min(4.2vw, 8.5vh), 82px);
-  height: clamp(58px, min(4.2vw, 8.5vh), 82px);
+.start-menu-app img,
+.start-menu-app svg {
+  width: 42px;
+  height: 42px;
 }
 
-.overview-app img {
+.start-menu-app img {
   object-fit: contain;
 }
 
-.overview-app span {
+.start-menu-app span {
   max-width: min(150px, 100%);
   overflow: hidden;
-  font-size: clamp(12px, 0.78vw, 14px);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.overview-pagination {
+.start-menu-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -107,7 +103,7 @@
   margin: 4px auto 0;
 }
 
-.overview-page-dots {
+.start-menu-page-dots {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,8 +111,8 @@
   min-height: 30px;
 }
 
-.overview-page-control,
-.overview-page-dot {
+.start-menu-page-control,
+.start-menu-page-dot {
   --control-scale: 1;
   display: grid;
   place-items: center;
@@ -130,37 +126,37 @@
     transform 130ms var(--ease-shell);
 }
 
-.overview-page-control {
+.start-menu-page-control {
   width: 30px;
   height: 30px;
   background: rgba(255, 255, 255, 0.08);
 }
 
-.overview-page-control:hover:not(:disabled),
-.overview-page-dot:hover {
+.start-menu-page-control:hover:not(:disabled),
+.start-menu-page-dot:hover {
   background: rgba(255, 255, 255, 0.14);
 }
 
-.overview-page-control:disabled {
+.start-menu-page-control:disabled {
   opacity: 0.34;
 }
 
-.overview-page-control:active:not(:disabled),
-.overview-page-dot:active {
+.start-menu-page-control:active:not(:disabled),
+.start-menu-page-dot:active {
   --control-scale: 0.96;
 }
 
-.overview-page-control svg {
+.start-menu-page-control svg {
   width: 16px;
   height: 16px;
 }
 
-.overview-page-dot {
+.start-menu-page-dot {
   width: 30px;
   height: 30px;
 }
 
-.overview-page-dot span {
+.start-menu-page-dot span {
   display: block;
   width: 6px;
   height: 6px;
@@ -171,12 +167,12 @@
     background-color 170ms var(--ease-shell);
 }
 
-.overview-page-dot.is-active span {
+.start-menu-page-dot.is-active span {
   width: 18px;
   background: color-mix(in srgb, var(--accent), white 10%);
 }
 
-.overview-empty {
+.start-menu-empty {
   grid-column: 1 / -1;
   display: grid;
   place-items: center;
@@ -186,38 +182,26 @@
   font-weight: 600;
 }
 
-.overview-empty svg {
+.start-menu-empty svg {
   width: 32px;
   height: 32px;
   stroke-width: 1.6;
 }
 
-@keyframes overview-pages-in {
-  from {
-    opacity: 0;
-    transform: translate3d(var(--page-offset, 0%), 8px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(var(--page-offset, 0%), 0, 0);
-  }
-}
-
-@media (max-width: 900px) {
-  .overview-apps {
+@media (max-width: 560px) {
+  .start-menu-apps {
     width: min(100%, calc(100vw - 48px));
   }
 
-  .overview-app-page {
-    --overview-app-size: 112px;
+  .start-menu-app-page {
+    --start-menu-app-size: 78px;
     grid-template-columns: repeat(3, minmax(88px, 112px));
     grid-template-rows: repeat(var(--mobile-page-rows, 8), minmax(94px, 1fr));
     padding-inline: 16px;
   }
 
-  .overview-app img,
-  .overview-app svg {
+  .start-menu-app img,
+  .start-menu-app svg {
     width: 50px;
     height: 50px;
   }

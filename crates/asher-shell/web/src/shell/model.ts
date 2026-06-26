@@ -6,7 +6,7 @@ export type ShellSurface =
   | "quick-settings"
   | "date-center"
   | "notification-toast"
-  | "overview"
+  | "start-menu"
   | "settings";
 
 export type ShellSnapshot = {
@@ -20,7 +20,6 @@ export type ShellSnapshot = {
   blurEnabled: boolean;
   debugOverlay: boolean;
   safeMode: boolean;
-  chromeHidden: boolean;
   wallpaperUri?: string;
   glassBlurWallpaperUri?: string;
   palette: ShellPalette;
@@ -135,7 +134,7 @@ export type NotificationItem = {
 export type ShellAction =
   | { type: "open-launcher" }
   | { type: "launch-default-app"; app: "terminal" | "file-manager" | "browser" | "settings" }
-  | { type: "toggle-overview" }
+  | { type: "toggle-start-menu" }
   | { type: "toggle-quick-settings" }
   | { type: "toggle-date-center" }
   | { type: "workspace-switch"; workspace: string }
@@ -143,12 +142,15 @@ export type ShellAction =
   | { type: "workspace-new" }
   | { type: "workspace-set-profile"; profile: string }
   | { type: "window-activate"; window: number }
+  | { type: "window-close"; window: number }
+  | { type: "window-minimize"; window: number }
   | { type: "window-move"; window: number; workspace: string }
   | { type: "dock-launch"; command: string }
   | { type: "dock-menu-open"; command: string; x?: number }
   | { type: "dock-menu-close" }
   | { type: "dock-pin"; label: string; command: string; icon?: string }
   | { type: "dock-unpin"; command: string }
+  | { type: "dock-force-quit"; command: string }
   | { type: "dock-reorder"; commands: string[] }
   | { type: "app-launch"; command: string }
   | { type: "tray-activate"; index: number }
@@ -183,7 +185,6 @@ export const emptySnapshot = (): ShellSnapshot => {
     blurEnabled: true,
     debugOverlay: false,
     safeMode: false,
-    chromeHidden: false,
     wallpaperUri: undefined,
     glassBlurWallpaperUri: undefined,
     palette: {

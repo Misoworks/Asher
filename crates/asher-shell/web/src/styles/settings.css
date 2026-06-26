@@ -1,18 +1,17 @@
 .settings-shell {
   --settings-content: #111110;
   --settings-surface: #1a1a18;
-  --settings-control: #252522;
-  --settings-control-hover: #31312e;
-  --settings-sidebar-solid: rgba(17, 17, 15, 0.14);
-  --settings-sidebar-tint: color-mix(in srgb, var(--settings-glass-sidebar, rgba(22, 22, 20, 0.34)), transparent 12%);
-  --settings-sidebar-overlay: rgba(10, 10, 9, 0.06);
+  --settings-control: rgba(255, 255, 255, 0.075);
+  --settings-control-hover: rgba(255, 255, 255, 0.12);
+  --settings-sidebar-solid: rgba(16, 16, 14, 0.34);
+  --settings-sidebar-tint: color-mix(in srgb, var(--settings-glass-sidebar, rgba(22, 22, 20, 0.5)), transparent 8%);
+  --settings-sidebar-overlay: rgba(10, 10, 9, 0.18);
   --settings-active: rgba(245, 245, 242, 0.09);
   --settings-text: var(--settings-glass-text, #f3f3ef);
   --settings-soft: var(--settings-glass-soft, #c9c9c3);
   --settings-muted: var(--settings-glass-muted, #8f8f88);
   --settings-accent: var(--settings-glass-accent, #d2c082);
   --settings-hairline: rgba(245, 245, 242, 0.1);
-  --settings-glass-blur-image: none;
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
   width: 100%;
@@ -44,20 +43,13 @@
   background:
     linear-gradient(var(--settings-sidebar-tint), var(--settings-sidebar-tint)),
     linear-gradient(var(--settings-sidebar-overlay), var(--settings-sidebar-overlay)),
-    var(--settings-glass-blur-image),
     var(--settings-sidebar-solid);
   background-position:
     center,
-    center,
-    var(--settings-glass-blur-x, center) var(--settings-glass-blur-y, center),
     center;
   background-size:
     cover,
-    cover,
-    cover,
     cover;
-  -webkit-backdrop-filter: blur(42px) saturate(1.14);
-  backdrop-filter: blur(42px) saturate(1.14);
 }
 
 .settings-window-controls {
@@ -166,7 +158,7 @@
   min-width: 0;
   overflow: hidden;
   border-radius: 0 18px 18px 0;
-  background: var(--settings-content);
+  background: transparent;
 }
 
 .settings-titlebar {
@@ -175,6 +167,10 @@
   gap: 8px;
   min-width: 0;
   padding: 10px 14px 8px 16px;
+  background:
+    linear-gradient(var(--settings-sidebar-tint), var(--settings-sidebar-tint)),
+    linear-gradient(var(--settings-sidebar-overlay), var(--settings-sidebar-overlay)),
+    var(--settings-sidebar-solid);
   box-shadow: inset 0 -1px 0 var(--settings-hairline);
 }
 
@@ -206,7 +202,31 @@
   overflow: hidden auto;
   overscroll-behavior: contain;
   padding: 24px 28px 34px;
+  background: var(--settings-content);
   -webkit-overflow-scrolling: touch;
+}
+
+.settings-loading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+}
+
+.settings-loading span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: conic-gradient(from 40deg, transparent 0 26%, color-mix(in srgb, var(--settings-text), transparent 8%) 72%, transparent 100%);
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.18));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  animation: settings-spinner 780ms linear infinite;
+}
+
+@keyframes settings-spinner {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 .settings-section h2 {

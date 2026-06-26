@@ -4,12 +4,12 @@ use tracing::warn;
 
 impl WebShell {
     pub(super) fn reload_config_from_command(&mut self) {
-        self.hide_chrome();
+        self.close_transient_popovers();
         self.reload_shell_config();
     }
 
     pub(super) fn open_logs_folder(&mut self) {
-        self.hide_chrome();
+        self.close_transient_popovers();
         let file_manager = self.config.default_apps.file_manager.trim();
         if file_manager.is_empty() {
             warn!("cannot open logs folder without a configured file manager");
@@ -32,7 +32,7 @@ impl WebShell {
     }
 
     pub(super) fn toggle_safe_mode(&mut self) {
-        self.hide_chrome();
+        self.close_transient_popovers();
         let mut config = self.config.clone();
         config.general.safe_mode = !config.general.safe_mode;
         self.save_shell_config(config);

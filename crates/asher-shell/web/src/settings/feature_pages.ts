@@ -118,7 +118,7 @@ export function featureDefinition(page: SettingsPage, settings: SettingsSnapshot
           {
             title: "Shortcuts",
             rows: [
-              row("Overview", "Super"),
+              row("Start menu", "Super"),
               row("Workspaces", "Configured in Kestrel"),
               row("Custom shortcuts", "Not configured"),
             ],
@@ -239,7 +239,7 @@ export function featureDefinition(page: SettingsPage, settings: SettingsSnapshot
       return {
         groups: [
           {
-            title: "Overview Search",
+            title: "Start Menu Search",
             rows: [
               row("Applications", "On"),
               row("Settings", "On"),

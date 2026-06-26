@@ -89,13 +89,11 @@ impl WebShell {
         self.chrome = chrome;
         self.surfaces
             .set_panel_taskbar(self.model.active_mode == asher_layout::ModeId::Panel);
-        let chrome_mapped = self.chrome_visibility.mapped(self.overview_visible, true);
-        self.surfaces
-            .set_panel_visible(chrome.panel && chrome_mapped);
-        self.surfaces.dock.set_visible(chrome.dock && chrome_mapped);
+        self.surfaces.set_panel_visible(chrome.panel);
+        self.surfaces.dock.set_visible(chrome.dock);
         let dock_menu_supported =
             chrome.dock || self.model.active_mode == asher_layout::ModeId::Panel;
-        if !dock_menu_supported || self.overview_visible {
+        if !dock_menu_supported {
             self.close_dock_menu();
         }
         self.surfaces.sidebar.set_visible(chrome.sidebar);
@@ -123,7 +121,6 @@ impl WebShell {
             self.palette,
             &self.config,
             self.config.general.safe_mode,
-            self.overview_visible,
         );
         let Ok(json) = serde_json::to_string(&snapshot) else {
             return;
@@ -139,7 +136,7 @@ impl WebShell {
     fn notification_toast_visible(&self) -> bool {
         !self.quick_visible
             && !self.date_visible
-            && !self.overview_visible
+            && !self.start_menu_visible
             && !self.notifications.snapshot().toast_items.is_empty()
     }
 }

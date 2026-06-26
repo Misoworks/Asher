@@ -3,7 +3,7 @@
   import Dock from "./components/Dock.svelte";
   import DockMenu from "./components/DockMenu.svelte";
   import NotificationToast from "./components/NotificationToast.svelte";
-  import Overview from "./components/Overview.svelte";
+  import StartMenu from "./components/StartMenu.svelte";
   import QuickSettings from "./components/QuickSettings.svelte";
   import SettingsApp from "./components/settings/SettingsApp.svelte";
   import Sidebar from "./components/Sidebar.svelte";
@@ -14,8 +14,8 @@
   import { onMount } from "svelte";
 
   let snapshot = $state.raw<ShellSnapshot>(getSnapshot());
-  let overviewQuery = $state("");
-  let overviewSelection = $state(-1);
+  let startMenuQuery = $state("");
+  let startMenuSelection = $state(-1);
 
   const surface = $derived(snapshot.surface ?? "panel");
   const rootElement = document.querySelector<HTMLElement>("#app");
@@ -51,8 +51,8 @@
     const previousSurface = snapshot.surface ?? "panel";
     const nextSurface = next.surface ?? "panel";
     snapshot = next;
-    if (nextSurface === "overview" && previousSurface !== "overview" && !overviewQuery.trim()) {
-      overviewSelection = -1;
+    if (nextSurface === "start-menu" && previousSurface !== "start-menu" && !startMenuQuery.trim()) {
+      startMenuSelection = -1;
     }
     if (!rootElement) return;
     rootElement.dataset.surface = next.surface ?? "panel";
@@ -103,7 +103,7 @@
         surfaceAnimationPhase = undefined;
       }
     },
-      phase === "opening" ? 280 : 150,
+      phase === "opening" ? 280 : 210,
     );
   }
 
@@ -133,8 +133,8 @@
       sendAction({ type: "quick-toggle-debug-overlay" });
       return;
     }
-    if (event.key === "Escape" && surface === "overview") {
-      sendAction({ type: "toggle-overview" });
+    if (event.key === "Escape" && surface === "start-menu") {
+      sendAction({ type: "toggle-start-menu" });
       return;
     }
     if (event.key === "Escape" && surface === "quick-settings") {
@@ -153,10 +153,11 @@
   function pointerdown(event: PointerEvent) {
     if (!(event.target instanceof Element)) return;
     const target = event.target;
-    if (
-      (surface === "quick-settings" || surface === "date-center") &&
-      !target.closest(".popover")
-    ) {
+    if (surface === "start-menu" && !target.closest(".shell-start-menu")) {
+      sendAction({ type: "toggle-start-menu" });
+      return;
+    }
+    if ((surface === "quick-settings" || surface === "date-center") && !target.closest(".popover")) {
       if (surface === "quick-settings") {
         sendAction({ type: "toggle-quick-settings" });
       } else {
@@ -183,13 +184,13 @@
   <DateCenter {snapshot} />
 {:else if surface === "notification-toast"}
   <NotificationToast {snapshot} />
-{:else if surface === "overview"}
-  <Overview
+{:else if surface === "start-menu"}
+  <StartMenu
     {snapshot}
-    query={overviewQuery}
-    selection={overviewSelection}
-    setQuery={(query) => (overviewQuery = query)}
-    setSelection={(selection) => (overviewSelection = selection)}
+    query={startMenuQuery}
+    selection={startMenuSelection}
+    setQuery={(query) => (startMenuQuery = query)}
+    setSelection={(selection) => (startMenuSelection = selection)}
   />
 {:else if surface === "settings"}
   <SettingsApp />

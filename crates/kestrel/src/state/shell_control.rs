@@ -5,10 +5,10 @@ use asher_layout::{Rect, WindowId, WindowInfo, WindowState, WorkspaceId};
 use tracing::warn;
 
 impl KestrelState {
-    pub fn send_shell_overview_toggle(&self) {
+    pub fn send_shell_start_menu_toggle(&self) {
         self.send_shell_control(
-            asher_ipc::ShellControlRequest::ToggleOverview,
-            "overview toggle",
+            asher_ipc::ShellControlRequest::ToggleStartMenu,
+            "start menu toggle",
         );
     }
 

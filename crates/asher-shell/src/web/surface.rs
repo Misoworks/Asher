@@ -2,12 +2,13 @@ use super::{
     actions::WebShellAction,
     model::{WebShellSnapshot, WebShellSurface},
     surface_layout::{PANEL_HEIGHT, PANEL_WIDTH_HINT, panel_size, shell_surface},
-    surface_sizing::{notification_toast_size, quick_settings_size},
+    surface_sizing::{dock_menu_size, notification_toast_size, quick_settings_size},
 };
 use crate::dock::DockApp;
 use fenestra_cef::{
     BridgeCommandDescriptor, BridgeError, BridgeResponse, FenestraProcess, FenestraWindow,
-    RuntimeConfig, RuntimeMode, ShellSurfaceOptions, WebViewSecurity,
+    RuntimeConfig, RuntimeMode, ShellSurfaceMargin, ShellSurfaceOptions, WebViewSecurity,
+    WindowRegion,
 };
 use serde_json::json;
 use std::{
@@ -19,17 +20,16 @@ use std::{
 };
 use tracing::{debug, warn};
 
-const DOCK_MENU_WIDTH: i32 = 184;
-const DOCK_MENU_HEIGHT: i32 = 128;
 const DATE_CENTER_WIDTH: i32 = 360;
-const DATE_CENTER_HEIGHT: i32 = 470;
-const SHELL_SURFACE_IDLE_TTL: Duration = Duration::from_secs(20);
+const DATE_CENTER_HEIGHT: i32 = 560;
+const START_MENU_WIDTH: i32 = 720;
+const START_MENU_HEIGHT: i32 = 640;
 const TRANSIENT_SURFACE_IDLE_TTL: Duration = Duration::from_secs(8);
 
 pub struct WebSurfaces {
     pub dock: WebSurface,
     pub sidebar: LazyWebSurface,
-    pub overview: LazyWebSurface,
+    pub start_menu: LazyWebSurface,
     pub quick: LazyWebSurface,
     pub date: LazyWebSurface,
     pub notification_toast: LazyWebSurface,
@@ -68,7 +68,7 @@ impl WebSurfaces {
             )?,
             dock_menu: LazyWebSurface::new(
                 WebShellSurface::DockMenu,
-                (DOCK_MENU_WIDTH, DOCK_MENU_HEIGHT),
+                dock_menu_size(snapshot),
                 panel_taskbar,
                 &actions_tx,
                 snapshot,
@@ -80,10 +80,10 @@ impl WebSurfaces {
                 &actions_tx,
                 snapshot,
             ),
-            overview: LazyWebSurface::new(
-                WebShellSurface::Overview,
-                (1, 1),
-                false,
+            start_menu: LazyWebSurface::new(
+                WebShellSurface::StartMenu,
+                (START_MENU_WIDTH, START_MENU_HEIGHT),
+                panel_taskbar,
                 &actions_tx,
                 snapshot,
             ),
@@ -109,10 +109,10 @@ impl WebSurfaces {
                 snapshot,
             ),
         };
+        surfaces.quick.prewarm();
+        surfaces.date.prewarm();
         if shell_prewarm_enabled() {
-            surfaces.overview.prewarm();
-            surfaces.quick.prewarm();
-            surfaces.date.prewarm();
+            surfaces.start_menu.prewarm();
         }
         surfaces.dock_menu.ensure_created();
         surfaces.notification_toast.ensure_created();
@@ -122,9 +122,11 @@ impl WebSurfaces {
     pub fn evaluate_snapshot(&mut self, snapshot: &WebShellSnapshot, json: &str) {
         self.panel.evaluate_snapshot(snapshot, json);
         self.dock.evaluate_snapshot(snapshot, json);
+        self.dock_menu.resize(dock_menu_size(snapshot));
         self.dock_menu.evaluate_snapshot(snapshot, json);
         self.sidebar.evaluate_snapshot(snapshot, json);
-        self.overview.evaluate_snapshot(snapshot, json);
+        self.start_menu.evaluate_snapshot(snapshot, json);
+        self.quick.resize(quick_settings_size(snapshot));
         self.quick.evaluate_snapshot(snapshot, json);
         self.date.evaluate_snapshot(snapshot, json);
         self.notification_toast.evaluate_snapshot(snapshot, json);
@@ -139,6 +141,7 @@ impl WebSurfaces {
         self.dock_menu.set_panel_taskbar(taskbar);
         self.quick.set_panel_taskbar(taskbar);
         self.date.set_panel_taskbar(taskbar);
+        self.start_menu.set_panel_taskbar(taskbar);
         self.notification_toast.set_panel_taskbar(taskbar);
     }
 
@@ -162,10 +165,19 @@ impl WebSurfaces {
     pub fn tick(&mut self) {
         self.dock_menu.tick();
         self.sidebar.tick();
-        self.overview.tick();
+        self.start_menu.tick();
         self.quick.tick();
         self.date.tick();
         self.notification_toast.tick();
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.dock_menu.is_animating()
+            || self.sidebar.is_animating()
+            || self.start_menu.is_animating()
+            || self.quick.is_animating()
+            || self.date.is_animating()
+            || self.notification_toast.is_animating()
     }
 }
 
@@ -176,8 +188,13 @@ pub struct LazyWebSurface {
     snapshot: WebShellSnapshot,
     snapshot_json: String,
     visible: bool,
+    show_at: Option<Instant>,
+    show_started_at: Option<Instant>,
+    show_start_alpha: f32,
+    show_start_margin: Option<ShellSurfaceMargin>,
     hide_at: Option<Instant>,
     hide_started_at: Option<Instant>,
+    hide_start_margin: Option<ShellSurfaceMargin>,
     release_at: Option<Instant>,
     panel_taskbar: bool,
     dock_menu_x: Option<i32>,
@@ -199,8 +216,13 @@ impl LazyWebSurface {
             snapshot: snapshot.clone(),
             snapshot_json: serde_json::to_string(snapshot).unwrap_or_default(),
             visible: false,
+            show_at: None,
+            show_started_at: None,
+            show_start_alpha: 0.0,
+            show_start_margin: None,
             hide_at: None,
             hide_started_at: None,
+            hide_start_margin: None,
             release_at: None,
             panel_taskbar,
             dock_menu_x: None,
@@ -219,16 +241,21 @@ impl LazyWebSurface {
                 }
             }
             self.visible = false;
+            self.show_at = None;
+            self.show_started_at = None;
+            self.show_start_margin = None;
             if let Some(surface) = &mut self.surface {
                 if let Some(delay) = close_animation_duration(self.kind) {
                     let now = Instant::now();
                     self.hide_started_at = Some(now);
+                    self.hide_start_margin = Some(surface.shell_margin);
                     surface.set_surface_alpha(1.0);
                     surface.emit_surface_close();
                     self.hide_at = Some(now + delay);
                 } else {
                     self.hide_at = None;
                     self.hide_started_at = None;
+                    self.hide_start_margin = None;
                     surface.set_surface_alpha(0.0);
                     surface.set_visible(false);
                     self.schedule_release(Instant::now());
@@ -237,8 +264,11 @@ impl LazyWebSurface {
             return;
         }
 
+        let now = Instant::now();
+        let resume_alpha = self.current_close_alpha(now);
         let was_closing = self.hide_at.take().is_some();
         self.hide_started_at = None;
+        self.hide_start_margin = None;
         self.release_at = None;
         if self.surface.is_none() {
             self.ensure_created();
@@ -249,16 +279,72 @@ impl LazyWebSurface {
 
         self.visible = true;
         if let Some(surface) = &mut self.surface {
-            surface.set_surface_alpha(1.0);
-            if was_closing {
-                surface.emit_surface_open();
+            let open_duration = open_animation_duration(self.kind);
+            let animates_alpha = surface_alpha_animates(self.kind);
+            let animates_margin = surface_margin_animates(self.kind);
+            let target_margin = surface.base_shell_margin();
+            let initial_margin = if animates_margin {
+                surface.shell_margin
+            } else {
+                target_margin
+            };
+            if !was_closing && animates_margin {
+                surface.set_shell_margin(hidden_shell_margin(
+                    self.kind,
+                    target_margin,
+                    surface.size,
+                    self.panel_taskbar,
+                ));
             }
-            surface.set_visible(true);
+            let initial_alpha = if open_duration.is_some() && animates_alpha && !was_closing {
+                0.0
+            } else {
+                resume_alpha.unwrap_or(1.0)
+            };
+            surface.set_visible_with_alpha(true, initial_alpha);
+            surface.emit_surface_open();
+            if let Some(duration) = open_duration.filter(|_| animates_alpha || animates_margin) {
+                self.show_started_at = Some(now);
+                self.show_at = Some(now + duration);
+                self.show_start_alpha = initial_alpha;
+                self.show_start_margin = Some(if was_closing {
+                    initial_margin
+                } else {
+                    surface.shell_margin
+                });
+                if was_closing {
+                    self.tick_open(now, now + duration);
+                } else if animates_alpha {
+                    surface.set_surface_alpha(0.0);
+                }
+            } else {
+                self.show_started_at = None;
+                self.show_at = None;
+                self.show_start_alpha = 1.0;
+                self.show_start_margin = None;
+                surface.set_surface_alpha(1.0);
+                surface.set_shell_margin(target_margin);
+            }
         }
     }
 
     fn tick(&mut self) {
         let now = Instant::now();
+        if let Some(show_at) = self.show_at {
+            self.tick_open(now, show_at);
+            if now >= show_at {
+                self.show_at = None;
+                self.show_started_at = None;
+                self.show_start_margin = None;
+                if self.visible {
+                    if let Some(surface) = &mut self.surface {
+                        surface.set_surface_alpha(1.0);
+                        surface.set_shell_margin(surface.base_shell_margin());
+                    }
+                }
+            }
+        }
+
         if let Some(hide_at) = self.hide_at {
             self.tick_close_alpha(now, hide_at);
             if now < hide_at {
@@ -266,9 +352,16 @@ impl LazyWebSurface {
             }
             self.hide_at = None;
             self.hide_started_at = None;
+            self.hide_start_margin = None;
             if !self.visible {
                 if let Some(surface) = &mut self.surface {
                     surface.set_surface_alpha(0.0);
+                    surface.set_shell_margin(hidden_shell_margin(
+                        self.kind,
+                        surface.base_shell_margin(),
+                        surface.size,
+                        self.panel_taskbar,
+                    ));
                     surface.set_visible(false);
                 }
                 self.schedule_release(now);
@@ -278,13 +371,17 @@ impl LazyWebSurface {
         let Some(release_at) = self.release_at else {
             return;
         };
-        if self.visible || self.hide_at.is_some() || now < release_at {
+        if self.visible || self.hide_at.is_some() || self.show_at.is_some() || now < release_at {
             return;
         }
         self.release_at = None;
         if let Some(surface) = &mut self.surface {
             surface.release_hidden_process();
         }
+    }
+
+    fn is_animating(&self) -> bool {
+        self.show_at.is_some() || self.hide_at.is_some()
     }
 
     fn ensure_created(&mut self) {
@@ -332,6 +429,16 @@ impl LazyWebSurface {
         }
     }
 
+    fn resize(&mut self, size: (i32, i32)) {
+        if self.size == size {
+            return;
+        }
+        self.size = size;
+        if let Some(surface) = &mut self.surface {
+            surface.resize(size);
+        }
+    }
+
     fn set_panel_taskbar(&mut self, taskbar: bool) {
         self.panel_taskbar = taskbar;
         if let Some(surface) = &mut self.surface {
@@ -367,12 +474,83 @@ impl LazyWebSurface {
         }
         let elapsed = now.saturating_duration_since(started_at);
         let progress = (elapsed.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0);
-        surface.set_surface_alpha(1.0 - smoothstep(progress));
+        let eased = smoothstep(progress);
+        let motion = close_motion_ease(progress);
+        if surface_alpha_animates(self.kind) {
+            surface.set_surface_alpha(1.0 - eased);
+        }
+        if surface_margin_animates(self.kind) {
+            let from = self
+                .hide_start_margin
+                .unwrap_or_else(|| surface.base_shell_margin());
+            let to = hidden_shell_margin(
+                self.kind,
+                surface.base_shell_margin(),
+                surface.size,
+                self.panel_taskbar,
+            );
+            surface.set_shell_margin(lerp_margin(from, to, motion));
+        }
+    }
+
+    fn tick_open(&mut self, now: Instant, show_at: Instant) {
+        let Some(started_at) = self.show_started_at else {
+            return;
+        };
+        let Some(surface) = &mut self.surface else {
+            return;
+        };
+        let total = show_at.saturating_duration_since(started_at);
+        if total.is_zero() {
+            surface.set_surface_alpha(1.0);
+            surface.set_shell_margin(surface.base_shell_margin());
+            return;
+        }
+        let elapsed = now.saturating_duration_since(started_at);
+        let progress = (elapsed.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0);
+        let eased = smoothstep(progress);
+        let motion = open_motion_ease(progress);
+        if surface_alpha_animates(self.kind) {
+            surface
+                .set_surface_alpha(self.show_start_alpha + (1.0 - self.show_start_alpha) * eased);
+        }
+        if surface_margin_animates(self.kind) {
+            let from = self.show_start_margin.unwrap_or_else(|| {
+                hidden_shell_margin(
+                    self.kind,
+                    surface.base_shell_margin(),
+                    surface.size,
+                    self.panel_taskbar,
+                )
+            });
+            let to = surface.base_shell_margin();
+            surface.set_shell_margin(lerp_margin(from, to, motion));
+        }
+    }
+
+    fn current_close_alpha(&self, now: Instant) -> Option<f32> {
+        let started_at = self.hide_started_at?;
+        let hide_at = self.hide_at?;
+        let total = hide_at.saturating_duration_since(started_at);
+        if total.is_zero() {
+            return Some(0.0);
+        }
+        let elapsed = now.saturating_duration_since(started_at);
+        let progress = (elapsed.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0);
+        Some(1.0 - smoothstep(progress))
     }
 }
 
 fn smoothstep(value: f32) -> f32 {
     value * value * (3.0 - 2.0 * value)
+}
+
+fn open_motion_ease(value: f32) -> f32 {
+    1.0 - (1.0 - value).powi(4)
+}
+
+fn close_motion_ease(value: f32) -> f32 {
+    value.powi(3)
 }
 
 pub struct WebSurface {
@@ -385,6 +563,8 @@ pub struct WebSurface {
     panel_taskbar: bool,
     dock_menu_x: Option<i32>,
     process: Option<FenestraProcess>,
+    surface_alpha: f32,
+    shell_margin: ShellSurfaceMargin,
     pending_snapshot: String,
     rendered_snapshot: String,
 }
@@ -401,6 +581,7 @@ impl WebSurface {
         snapshot: &WebShellSnapshot,
     ) -> Result<Self, Box<dyn Error>> {
         let initial = serde_json::to_string(snapshot)?;
+        let shell_margin = shell_surface(kind, size, panel_taskbar, dock_menu_x).margin;
         let mut surface = Self {
             kind,
             size,
@@ -411,6 +592,8 @@ impl WebSurface {
             panel_taskbar,
             dock_menu_x,
             process: None,
+            surface_alpha: if visible { 1.0 } else { 0.0 },
+            shell_margin,
             pending_snapshot: initial,
             rendered_snapshot: String::new(),
         };
@@ -419,12 +602,19 @@ impl WebSurface {
     }
 
     pub fn set_visible(&mut self, visible: bool) {
+        self.set_visible_with_alpha(visible, 1.0);
+    }
+
+    fn set_visible_with_alpha(&mut self, visible: bool, alpha: f32) {
         if self.visible == visible {
+            if visible {
+                self.set_surface_alpha(alpha);
+            }
             return;
         }
         self.visible = visible;
         if visible {
-            self.show_process();
+            self.show_process(alpha);
         } else {
             self.hide_process();
         }
@@ -435,6 +625,7 @@ impl WebSurface {
             return;
         }
         self.size = size;
+        self.shell_margin = self.base_shell_margin();
         self.restart_for_geometry_change();
     }
 
@@ -446,6 +637,7 @@ impl WebSurface {
         if self.kind == WebShellSurface::Panel {
             self.resize(panel_size(taskbar));
         } else {
+            self.shell_margin = self.base_shell_margin();
             self.restart_for_geometry_change();
         }
     }
@@ -455,6 +647,7 @@ impl WebSurface {
             return;
         }
         self.dock_menu_x = x;
+        self.shell_margin = self.base_shell_margin();
         if self.kind == WebShellSurface::DockMenu {
             self.restart_for_geometry_change();
         }
@@ -501,12 +694,11 @@ impl WebSurface {
         }
     }
 
-    fn show_process(&mut self) {
+    fn show_process(&mut self, alpha: f32) {
         let had_process = self.process.is_some();
         if had_process {
             self.flush_snapshot();
-            self.set_surface_alpha(1.0);
-            self.emit_surface_open();
+            self.set_surface_alpha(alpha);
         }
         let restored = self
             .process
@@ -518,9 +710,8 @@ impl WebSurface {
         }
         if self.process.is_none() {
             self.launch();
-            self.set_surface_alpha(1.0);
+            self.set_surface_alpha(alpha);
             self.flush_snapshot();
-            self.emit_surface_open();
             return;
         }
         self.flush_snapshot();
@@ -554,27 +745,46 @@ impl WebSurface {
     }
 
     fn set_surface_alpha(&mut self, alpha: f32) {
+        self.surface_alpha = alpha.clamp(0.0, 1.0);
         if let Some(process) = &self.process {
-            let _ = process.set_shell_surface_alpha(alpha.clamp(0.0, 1.0));
+            let _ = process.set_shell_surface_alpha(self.surface_alpha);
         }
+    }
+
+    fn set_shell_margin(&mut self, margin: ShellSurfaceMargin) {
+        if self.shell_margin == margin {
+            return;
+        }
+        self.shell_margin = margin;
+        if let Some(process) = &self.process {
+            let _ = process.set_shell_surface_margin(margin);
+        }
+    }
+
+    fn base_shell_margin(&self) -> ShellSurfaceMargin {
+        shell_surface(self.kind, self.size, self.panel_taskbar, self.dock_menu_x).margin
     }
 
     fn build_window(&self) -> FenestraWindow {
         let snapshot = Arc::clone(&self.snapshot);
         let action_tx = self.actions_tx.clone();
         let kind = self.kind;
-        let shell_options = shell_surface(kind, self.size, self.panel_taskbar, self.dock_menu_x);
+        let shell_options = shell_surface(kind, self.size, self.panel_taskbar, self.dock_menu_x)
+            .margin(self.shell_margin);
         let (width, height) = cef_initial_size(&shell_options, self.size);
 
         let window = FenestraWindow::new()
             .title(format!("Asher {}", kind.as_str()))
             .fixed_size(width, height)
             .frameless()
-            .transparent(true)
+            .glass()
             .always_on_top(true)
             .shell_surface(shell_options)
+            .shell_surface_alpha(self.surface_alpha)
             .visible(self.visible)
-            .active(self.visible && kind == WebShellSurface::Overview)
+            .active(self.visible && kind == WebShellSurface::StartMenu)
+            .active_frame_rate(shell_surface_frame_rate())
+            .blur_region(shell_blur_region(kind, width as i32, height as i32))
             .runtime(runtime_config())
             .security(WebViewSecurity::default())
             .bridge_descriptor_handler(
@@ -664,11 +874,11 @@ impl WebSurface {
 
 fn close_animation_duration(kind: WebShellSurface) -> Option<Duration> {
     match kind {
-        WebShellSurface::Overview => Some(Duration::from_millis(145)),
+        WebShellSurface::StartMenu => Some(Duration::from_millis(170)),
         WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
-            Some(Duration::from_millis(125))
+            Some(Duration::from_millis(170))
         }
-        WebShellSurface::DockMenu => Some(Duration::from_millis(120)),
+        WebShellSurface::DockMenu => Some(Duration::from_millis(170)),
         WebShellSurface::Panel
         | WebShellSurface::Dock
         | WebShellSurface::Sidebar
@@ -676,15 +886,113 @@ fn close_animation_duration(kind: WebShellSurface) -> Option<Duration> {
     }
 }
 
+fn open_animation_duration(kind: WebShellSurface) -> Option<Duration> {
+    match kind {
+        WebShellSurface::StartMenu => Some(Duration::from_millis(190)),
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
+            Some(Duration::from_millis(190))
+        }
+        WebShellSurface::DockMenu => Some(Duration::from_millis(190)),
+        WebShellSurface::Panel
+        | WebShellSurface::Dock
+        | WebShellSurface::Sidebar
+        | WebShellSurface::NotificationToast => None,
+    }
+}
+
+fn shell_surface_frame_rate() -> u32 {
+    env::var("ASHER_OUTPUT_REFRESH_MILLIHERTZ")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|millihertz| (millihertz.saturating_add(999)) / 1000)
+        .filter(|rate| *rate > 0)
+        .unwrap_or(60)
+}
+
+fn surface_alpha_animates(kind: WebShellSurface) -> bool {
+    !matches!(
+        kind,
+        WebShellSurface::StartMenu | WebShellSurface::QuickSettings | WebShellSurface::DateCenter
+    )
+}
+
+fn surface_margin_animates(kind: WebShellSurface) -> bool {
+    matches!(
+        kind,
+        WebShellSurface::StartMenu
+            | WebShellSurface::QuickSettings
+            | WebShellSurface::DateCenter
+            | WebShellSurface::DockMenu
+    )
+}
+
 fn hidden_process_ttl(kind: WebShellSurface) -> Option<Duration> {
     match kind {
-        WebShellSurface::Overview
-        | WebShellSurface::QuickSettings
-        | WebShellSurface::DateCenter => Some(SHELL_SURFACE_IDLE_TTL),
+        WebShellSurface::StartMenu => None,
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => None,
         WebShellSurface::DockMenu
         | WebShellSurface::NotificationToast
         | WebShellSurface::Sidebar => Some(TRANSIENT_SURFACE_IDLE_TTL),
         WebShellSurface::Panel | WebShellSurface::Dock => None,
+    }
+}
+
+fn hidden_shell_margin(
+    kind: WebShellSurface,
+    base: ShellSurfaceMargin,
+    size: (i32, i32),
+    panel_taskbar: bool,
+) -> ShellSurfaceMargin {
+    let mut margin = base;
+    match kind {
+        WebShellSurface::QuickSettings if panel_taskbar => {
+            margin.bottom = -(size.1 + 8);
+        }
+        WebShellSurface::StartMenu if panel_taskbar => {
+            margin.bottom = -(size.1 + 10);
+        }
+        WebShellSurface::StartMenu => {
+            margin.bottom = -(size.1 + 8);
+        }
+        WebShellSurface::QuickSettings => {
+            margin.top = -(size.1 + 8);
+        }
+        WebShellSurface::DockMenu => {
+            margin.bottom = -(size.1 + 8);
+        }
+        WebShellSurface::DateCenter => {
+            margin.right = -(size.0 + 8);
+        }
+        _ => {}
+    }
+    margin
+}
+
+fn lerp_margin(
+    from: ShellSurfaceMargin,
+    to: ShellSurfaceMargin,
+    progress: f32,
+) -> ShellSurfaceMargin {
+    ShellSurfaceMargin {
+        top: lerp_i32(from.top, to.top, progress),
+        right: lerp_i32(from.right, to.right, progress),
+        bottom: lerp_i32(from.bottom, to.bottom, progress),
+        left: lerp_i32(from.left, to.left, progress),
+    }
+}
+
+fn lerp_i32(from: i32, to: i32, progress: f32) -> i32 {
+    (from as f32 + (to - from) as f32 * progress)
+        .round()
+        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+}
+
+fn shell_blur_region(kind: WebShellSurface, _width: i32, _height: i32) -> WindowRegion {
+    match kind {
+        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
+            WindowRegion::adaptive_rounded_rect(26)
+        }
+        _ => WindowRegion::adaptive_full(),
     }
 }
 

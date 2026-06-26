@@ -76,8 +76,8 @@
   --app-launch-rest-y: var(--app-icon-lift, -9px);
 }
 
-#app[data-surface="dock"] .app-button,
-#app[data-surface="panel"] .app-button {
+.dock-item,
+.taskbar-app {
   --app-icon-lift: -10px;
 }
 

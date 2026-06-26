@@ -7,8 +7,6 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.055),
     0 1px 2px rgba(0, 0, 0, 0.16);
-  -webkit-backdrop-filter: blur(18px) saturate(1.08);
-  backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .settings-row,
@@ -189,9 +187,20 @@
   min-height: 30px;
   padding: 0;
   border-radius: 999px;
-  background: var(--settings-control);
-  box-shadow: inset 0 1px 0 var(--settings-hairline);
+  background: transparent;
   touch-action: none;
+}
+
+.settings-slider::before {
+  position: absolute;
+  top: 50%;
+  left: 7px;
+  width: calc(100% - 14px);
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--settings-control), white 8%);
+  content: "";
+  transform: translateY(-50%);
 }
 
 .settings-slider-fill {
@@ -218,7 +227,11 @@
 }
 
 .settings-slider:hover {
-  background: var(--settings-control-hover);
+  background: transparent;
+}
+
+.settings-slider:hover::before {
+  background: color-mix(in srgb, var(--settings-control-hover), white 8%);
 }
 
 .settings-actions {

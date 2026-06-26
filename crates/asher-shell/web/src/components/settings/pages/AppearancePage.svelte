@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SettingsPatch, SettingsSnapshot } from "../../../settings/model";
+  import SettingsSlider from "../SettingsSlider.svelte";
 
   let { settings, apply } = $props<{
     settings: SettingsSnapshot;
@@ -38,6 +39,19 @@
       {/each}
     </div>
     <div class="settings-row">
+      <span>Effects</span>
+      <button
+        type="button"
+        class="settings-switch"
+        class:is-on={settings.general.enableEffects}
+        aria-label="Toggle effects"
+        aria-pressed={settings.general.enableEffects}
+        onclick={() => apply({ enableEffects: !settings.general.enableEffects })}
+      >
+        <span></span>
+      </button>
+    </div>
+    <div class="settings-row">
       <span>Animations</span>
       <button
         type="button"
@@ -56,6 +70,15 @@
 <section class="settings-section">
   <h2>Visual quality</h2>
   <div class="settings-group">
+    <SettingsSlider
+      label="Dock icon size"
+      value={settings.appearance.dockIconSize}
+      min={32}
+      max={64}
+      step={2}
+      unit="px"
+      onChange={(dockIconSize) => apply({ dockIconSize })}
+    />
     <div class="segmented-control is-compact">
       {#each performanceModes as mode (mode.id)}
         <button
@@ -67,6 +90,19 @@
           {mode.label}
         </button>
       {/each}
+    </div>
+    <div class="settings-row">
+      <span>Reduce effects on battery</span>
+      <button
+        type="button"
+        class="settings-switch"
+        class:is-on={settings.performance.reduceEffectsOnBattery}
+        aria-label="Reduce effects on battery"
+        aria-pressed={settings.performance.reduceEffectsOnBattery}
+        onclick={() => apply({ reduceEffectsOnBattery: !settings.performance.reduceEffectsOnBattery })}
+      >
+        <span></span>
+      </button>
     </div>
   </div>
 </section>

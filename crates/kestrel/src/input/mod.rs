@@ -409,7 +409,7 @@ fn handle_shortcut(
         }
         ShortcutAction::SuperRelease => {
             if !state.super_used {
-                state.send_shell_overview_toggle();
+                state.send_shell_start_menu_toggle();
             }
             state.super_active = false;
             state.super_used = false;

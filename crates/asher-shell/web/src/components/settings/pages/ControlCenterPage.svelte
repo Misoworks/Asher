@@ -11,12 +11,12 @@
   <h2>Panel</h2>
   <div class="settings-group">
     <div class="settings-row">
-      <span>Overview button</span>
+      <span>Start menu button</span>
       <button
         type="button"
         class="settings-switch"
         class:is-on={settings.appearance.taskbarLauncher}
-        aria-label="Toggle overview button"
+        aria-label="Toggle Start menu button"
         aria-pressed={settings.appearance.taskbarLauncher}
         onclick={() => apply({ taskbarLauncher: !settings.appearance.taskbarLauncher })}
       >

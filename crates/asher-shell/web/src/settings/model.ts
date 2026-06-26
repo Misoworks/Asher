@@ -241,7 +241,7 @@ export const emptySettingsSnapshot = (): SettingsSnapshot => ({
   },
   defaultApps: {
     terminal: "ghostty",
-    fileManager: "nautilus",
+    fileManager: "rover",
     browser: "google-chrome-stable",
     settings: "asher-settings",
     launcher: "vicinae",

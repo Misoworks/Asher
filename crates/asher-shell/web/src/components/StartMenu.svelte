@@ -2,9 +2,10 @@
   import DebugMeter from "./DebugMeter.svelte";
   import Icon from "./Icon.svelte";
   import { sendAction } from "../shell/bridge";
-  import { filteredApplications, overviewSearchResults, selectedOverviewResult, type OverviewSearchResult } from "../lib/overview_state";
-  import type { Attachment } from "svelte/attachments";
+  import { filteredApplications, startMenuSearchResults, selectedStartMenuResult, type StartMenuSearchResult } from "../lib/start_menu_state";
   import type { ApplicationItem, ShellSnapshot } from "../shell/model";
+  import type { Attachment } from "svelte/attachments";
+  import { onMount } from "svelte";
 
   let {
     snapshot,
@@ -24,6 +25,7 @@
   const PAGE_WHEEL_DELAY = 280;
 
   let appPage = $state(0);
+  let searchInputElement: HTMLInputElement | undefined;
   let lastPageWheelAt = 0;
 
   const searching = $derived(Boolean(query.trim()));
@@ -31,17 +33,42 @@
   const appPages = $derived.by(() => paginateApplications(visibleApps));
   const appPageCount = $derived(Math.max(1, appPages.length));
   const currentAppPage = $derived(Math.min(appPage, appPageCount - 1));
-  const searchResults = $derived(overviewSearchResults(snapshot, query));
+  const searchResults = $derived(startMenuSearchResults(snapshot, query));
   const clampedSelection = $derived.by(() => {
     if (selection < 0 || searchResults.length <= 0) return -1;
     return Math.max(0, Math.min(selection, searchResults.length - 1));
   });
 
-  const focusSearch: Attachment<HTMLInputElement> = (node) => {
-    requestAnimationFrame(() => node.focus({ preventScroll: true }));
+  onMount(() => {
+    focusSearch();
+    const surfaceOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ surface?: string }>).detail;
+      if (detail?.surface === "start-menu") {
+        focusSearch();
+      }
+    };
+    window.addEventListener("fenestra:asher.surface-open", surfaceOpen);
+    return () => window.removeEventListener("fenestra:asher.surface-open", surfaceOpen);
+  });
+
+  function focusSearch() {
+    requestAnimationFrame(() => {
+      searchInputElement?.focus({ preventScroll: true });
+      searchInputElement?.select();
+    });
+  }
+
+  const captureSearchInput: Attachment<HTMLInputElement> = (node) => {
+    searchInputElement = node;
+    focusSearch();
+    return () => {
+      if (searchInputElement === node) {
+        searchInputElement = undefined;
+      }
+    };
   };
 
-  function scrollOverviewList(event: WheelEvent) {
+  function scrollStartMenuList(event: WheelEvent) {
     const node = event.currentTarget as HTMLElement;
     const maxScroll = node.scrollHeight - node.clientHeight;
     if (maxScroll <= 0) return;
@@ -51,9 +78,9 @@
     node.scrollTop = next;
   }
 
-  function overviewAppsWheel(event: WheelEvent) {
+  function startMenuAppsWheel(event: WheelEvent) {
     if (searching) {
-      scrollOverviewList(event);
+      scrollStartMenuList(event);
       return;
     }
     if (appPageCount <= 1) return;
@@ -95,7 +122,7 @@
       return;
     }
     event.preventDefault();
-    const result = selectedOverviewResult(searchResults, clampedSelection);
+    const result = selectedStartMenuResult(searchResults, clampedSelection);
     if (!result) {
       if (!searching) {
         sendAction({ type: "open-launcher" });
@@ -156,7 +183,7 @@
     }
   }
 
-  function activateResult(result: OverviewSearchResult) {
+  function activateResult(result: StartMenuSearchResult) {
     if (result.kind === "app") {
       sendAction({ type: "app-launch", command: result.app.command });
       return;
@@ -177,13 +204,13 @@
   }
 </script>
 
-<section class="shell-overview">
-  <header class="overview-top">
-    <label class="overview-search">
+<section class="shell-start-menu">
+  <header class="start-menu-top">
+    <label class="start-menu-search">
       <Icon name="search" />
       <input
-        {@attach focusSearch}
-        class="overview-search-input"
+        {@attach captureSearchInput}
+        class="start-menu-search-input"
         type="text"
         aria-label="Search apps"
         inputmode="search"
@@ -198,9 +225,9 @@
     </label>
   </header>
 
-  <div class:overview-apps={!searching} class:overview-results={searching} onwheel={overviewAppsWheel}>
+  <div class={searching ? "start-menu-results" : "start-menu-apps"} onwheel={startMenuAppsWheel}>
     {#if searching && searchResults.length === 0}
-      <div class="overview-empty">
+      <div class="start-menu-empty">
         <Icon name="search" />
         <span>No matches</span>
       </div>
@@ -208,13 +235,13 @@
       {#each searchResults as result, index (result.key)}
         <button
           type="button"
-          class="overview-result"
+          class="start-menu-result"
           class:is-selected={clampedSelection >= 0 && index === clampedSelection}
           style={`--index: ${index}`}
           onclick={() => activateResult(result)}
           onpointerenter={() => setSelection(index)}
         >
-          <span class="overview-result-icon">
+          <span class="start-menu-result-icon">
             {#if result.kind === "app" && result.iconUri}
               <img src={result.iconUri} alt="" />
             {:else if result.kind === "window" && result.iconUri}
@@ -231,31 +258,31 @@
               <Icon name="app" />
             {/if}
           </span>
-          <span class="overview-result-copy">
+          <span class="start-menu-result-copy">
             <strong>{result.title}</strong>
             <small>{result.detail}</small>
           </span>
-          <span class="overview-result-kind">{result.kind === "action" ? result.label : result.kind}</span>
+          <span class="start-menu-result-kind">{result.kind === "action" ? result.label : result.kind}</span>
         </button>
       {/each}
     {:else if visibleApps.length === 0}
-      <div class="overview-empty">
+      <div class="start-menu-empty">
         <Icon name="search" />
         <span>No apps found</span>
       </div>
     {:else}
-      <div class="overview-app-pages" style={`--page-offset: -${currentAppPage * 100}%`}>
+      <div class="start-menu-app-pages" style={`--page-offset: -${currentAppPage * 100}%`}>
         {#each appPages as page, pageIndex (appPageKey(page, pageIndex))}
           <div
-            class="overview-app-page"
-            style:--page-rows={pageRows(page, 8)}
+            class="start-menu-app-page"
+            style:--page-rows={pageRows(page, 6)}
             style:--mobile-page-rows={pageRows(page, 3)}
             aria-hidden={pageIndex !== currentAppPage}
           >
             {#each page as app, appIndex (app.command)}
               <button
                 type="button"
-                class="overview-app"
+                class="start-menu-app"
                 class:is-pinned={app.pinned}
                 style={`--index: ${pageIndex * APPS_PER_PAGE + appIndex}`}
                 aria-label={app.name}
@@ -278,15 +305,15 @@
   </div>
 
   {#if !searching && appPages.length > 1}
-    <nav class="overview-pagination" aria-label="Application pages">
-      <button type="button" class="overview-page-control" aria-label="Previous app page" onclick={previousAppPage} disabled={currentAppPage === 0}>
+    <nav class="start-menu-pagination" aria-label="Application pages">
+      <button type="button" class="start-menu-page-control" aria-label="Previous app page" onclick={previousAppPage} disabled={currentAppPage === 0}>
         <Icon name="chevron-left" />
       </button>
-      <div class="overview-page-dots">
+      <div class="start-menu-page-dots">
         {#each appPages as page, pageIndex (appPageKey(page, pageIndex))}
           <button
             type="button"
-            class="overview-page-dot"
+            class="start-menu-page-dot"
             class:is-active={pageIndex === currentAppPage}
             aria-label={`Application page ${pageIndex + 1}`}
             aria-current={pageIndex === currentAppPage ? "page" : undefined}
@@ -298,7 +325,7 @@
       </div>
       <button
         type="button"
-        class="overview-page-control"
+        class="start-menu-page-control"
         aria-label="Next app page"
         onclick={nextAppPage}
         disabled={currentAppPage === appPages.length - 1}
@@ -309,6 +336,6 @@
   {/if}
 
   {#if snapshot.debugOverlay}
-    <DebugMeter surface="OVERVIEW" />
+    <DebugMeter surface="START MENU" />
   {/if}
 </section>

@@ -7,9 +7,9 @@
 @import "./taskbar.css";
 @import "./quick_settings.css";
 @import "./notification_toast.css";
-@import "./overview.css";
-@import "./overview_apps.css";
-@import "./overview_search.css";
+@import "./start_menu.css";
+@import "./start_menu_apps.css";
+@import "./start_menu_search.css";
 @import "./sidebar.css";
 @import "./settings.css";
 @import "./settings_controls.css";
@@ -75,7 +75,7 @@ body,
 .dock-shell,
 .shell-dock,
 .popover,
-.shell-overview {
+.shell-start-menu {
   position: relative;
 }
 
@@ -107,6 +107,12 @@ body,
 #app[data-surface="date-center"] {
   display: block;
   background: transparent;
+}
+
+#app[data-surface="quick-settings"] .popover,
+#app[data-surface="date-center"] .popover {
+  height: 100vh;
+  max-height: 100vh;
 }
 
 button {
@@ -157,12 +163,6 @@ img {
   transition:
     opacity 170ms var(--ease-shell),
     transform 210ms var(--ease-shell);
-}
-
-.shell-panel.is-chrome-hidden {
-  opacity: 0;
-  transform: translateY(-38px) scaleX(0.98);
-  pointer-events: none;
 }
 
 .shell-panel button {
@@ -280,8 +280,12 @@ img {
   padding: 16px;
   border-radius: 26px;
   transform-origin: top right;
-  background: var(--material-popover);
-  box-shadow: none;
+  background:
+    linear-gradient(rgba(12, 12, 10, 0.08), rgba(12, 12, 10, 0.08)),
+    var(--material-popover);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.105),
+    inset 0 1px 0 rgba(255, 255, 255, 0.095);
 }
 
 #app[data-taskbar="true"][data-surface="quick-settings"] .popover,
@@ -289,13 +293,10 @@ img {
   transform-origin: bottom right;
 }
 
-#app.is-surface-opening[data-surface="quick-settings"] .popover,
-#app.is-surface-opening[data-surface="date-center"] .popover {
-  animation: popover-shell-in 145ms var(--ease-shell) both;
-  will-change: opacity;
+#app.is-surface-closing[data-surface="quick-settings"] .popover {
+  pointer-events: none;
 }
 
-#app.is-surface-closing[data-surface="quick-settings"] .popover,
 #app.is-surface-closing[data-surface="date-center"] .popover {
   pointer-events: none;
 }
@@ -309,15 +310,5 @@ img {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes popover-shell-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
   }
 }

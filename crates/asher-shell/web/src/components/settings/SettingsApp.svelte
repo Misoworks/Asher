@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { applySettings, initialSettingsPage, loadSettings, pickWallpaper, windowControl } from "../../settings/bridge";
+  import { applySettings, initialSettingsPage, loadSettings, pickWallpaper, startWindowDrag, windowControl } from "../../settings/bridge";
   import { emptySettingsSnapshot, type SettingsPage, type SettingsPatch, type SettingsSnapshot } from "../../settings/model";
   import Icon from "../Icon.svelte";
   import AboutPage from "./pages/AboutPage.svelte";
@@ -18,8 +18,7 @@
   let wallpaperPath = $state("");
   let searchQuery = $state("");
   let saving = $state(false);
-  let settingsRoot: HTMLElement | undefined;
-  const glassBlurImage = $derived(settings.wallpaper.glassBlurUri ? `url("${settings.wallpaper.glassBlurUri}")` : "none");
+  let loaded = $state(false);
 
   const pages: { id: SettingsPage; label: string; icon: string }[] = [
     { id: "appearance", label: "Appearance", icon: "palette" },
@@ -60,27 +59,24 @@
   ]);
 
   onMount(() => {
-    let frame = 0;
     let cancelled = false;
 
     activePage = normalizePage(initialSettingsPage());
     void (async () => {
-      const next = await loadSettings();
+      let next = emptySettingsSnapshot();
+      try {
+        next = await loadSettings();
+      } catch {
+        next = emptySettingsSnapshot();
+      }
       if (cancelled) return;
       settings = next;
       wallpaperPath = next.wallpaper.path ?? "";
+      loaded = true;
     })();
-
-    const syncGlassBlurPosition = () => {
-      settingsRoot?.style.setProperty("--settings-glass-blur-x", `${-Math.round(window.screenX || 0)}px`);
-      settingsRoot?.style.setProperty("--settings-glass-blur-y", `${-Math.round(window.screenY || 0)}px`);
-      frame = window.requestAnimationFrame(syncGlassBlurPosition);
-    };
-    syncGlassBlurPosition();
 
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frame);
     };
   });
 
@@ -123,12 +119,18 @@
     if (!needle) return pages;
     return pages.filter((page) => `${page.label} ${page.id}`.toLowerCase().includes(needle));
   }
+
+  function beginWindowDrag(event: PointerEvent) {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    if (event.target.closest("button, input, label, nav, a, [role='button'], [role='slider']")) return;
+    event.preventDefault();
+    startWindowDrag();
+  }
 </script>
 
 <svelte:window onkeydown={keydown} />
 
 <section
-  bind:this={settingsRoot}
   class="settings-shell"
   data-material={settings.appearance.materialMode}
   style:--settings-glass-sidebar={settings.palette.panel}
@@ -138,9 +140,8 @@
   style:--settings-glass-muted={settings.palette.textMuted}
   style:--settings-glass-accent={settings.palette.accent}
   style:--settings-glass-dock={settings.palette.dock}
-  style:--settings-glass-blur-image={glassBlurImage}
 >
-  <aside class="settings-sidebar" data-effect="translucent">
+  <aside class="settings-sidebar" data-effect="translucent" onpointerdown={beginWindowDrag}>
     <div class="settings-window-controls">
       <button type="button" class="settings-window-control" aria-label="Close" onclick={() => windowControl("close")}>
         <Icon name="close" />
@@ -175,7 +176,7 @@
   </aside>
 
   <main class="settings-content">
-    <header class="settings-titlebar">
+    <header class="settings-titlebar" role="presentation" onpointerdown={beginWindowDrag}>
       <button type="button" class="settings-icon-button" aria-label="Back">
         <Icon name="chevron-left" />
       </button>
@@ -187,7 +188,11 @@
     </header>
 
     <div class="settings-page">
-      {#if activePage === "appearance"}
+      {#if !loaded}
+        <div class="settings-loading" role="status" aria-live="polite" aria-label="Loading settings">
+          <span></span>
+        </div>
+      {:else if activePage === "appearance"}
         <AppearancePage {settings} {apply} />
       {:else if activePage === "control-center"}
         <ControlCenterPage {settings} {apply} />

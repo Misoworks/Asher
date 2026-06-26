@@ -134,7 +134,7 @@ mod tests {
     fn appends_page_to_plain_settings_command() {
         assert_eq!(
             settings_command("asher-settings", "sound"),
-            "asher-settings --page sound"
+            format!("{} --page sound", expected_settings_command())
         );
     }
 
@@ -142,7 +142,7 @@ mod tests {
     fn replaces_gnome_control_center_with_asher_settings() {
         assert_eq!(
             settings_command("gnome-control-center", "sound"),
-            "asher-settings --page sound"
+            format!("{} --page sound", expected_settings_command())
         );
     }
 
@@ -150,7 +150,10 @@ mod tests {
     fn separates_dbus_run_session_options_from_settings_page() {
         assert_eq!(
             settings_command("dbus-run-session asher-settings", "sound"),
-            "dbus-run-session -- asher-settings --page sound"
+            format!(
+                "dbus-run-session -- {} --page sound",
+                expected_settings_command()
+            )
         );
     }
 
@@ -158,7 +161,10 @@ mod tests {
     fn keeps_existing_dbus_run_session_separator() {
         assert_eq!(
             settings_command("dbus-run-session -- asher-settings", "power"),
-            "dbus-run-session -- asher-settings --page power"
+            format!(
+                "dbus-run-session -- {} --page power",
+                expected_settings_command()
+            )
         );
     }
 
@@ -169,7 +175,10 @@ mod tests {
                 "dbus-run-session --config-file /tmp/bus.conf asher-settings",
                 "display"
             ),
-            "dbus-run-session --config-file /tmp/bus.conf -- asher-settings --page display"
+            format!(
+                "dbus-run-session --config-file /tmp/bus.conf -- {} --page display",
+                expected_settings_command()
+            )
         );
     }
 
@@ -229,5 +238,10 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(temp);
+    }
+
+    fn expected_settings_command() -> String {
+        settings_command_replacement(current_exe().as_deref())
+            .unwrap_or_else(|| "asher-settings".to_string())
     }
 }

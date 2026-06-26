@@ -4,8 +4,8 @@ use crate::{
     control::ShellControlServer,
     dock::{self, DockApp, dock_app_matches_window},
     ipc::{
-        ShellModel, activate_window, minimize_window, move_window_to_workspace, set_debug_overlay,
-        set_workspace_profile, switch_relative_workspace, switch_workspace,
+        ShellModel, activate_window, close_window, minimize_window, move_window_to_workspace,
+        set_debug_overlay, set_workspace_profile, switch_relative_workspace, switch_workspace,
     },
     services::{
         notifications::NotificationService,
@@ -16,7 +16,6 @@ use crate::{
 };
 mod actions;
 mod appearance;
-mod chrome_visibility;
 mod command_actions;
 mod icons;
 mod init;
@@ -32,12 +31,11 @@ use actions::{
     QuickSettingsPage, SessionCommand, WebShellAction, profile_id, window_id, workspace_id,
 };
 use asher_config::AsherConfig;
-use chrome_visibility::ChromeVisibility;
 use settings_command::settings_command;
 use std::{
     cell::RefCell,
     error::Error,
-    process::Child,
+    process::{Child, Command},
     rc::Rc,
     sync::mpsc::{self, Receiver},
     thread,
@@ -51,21 +49,40 @@ const STATUS_REFRESH: Duration = Duration::from_secs(1);
 const CONFIG_REFRESH: Duration = Duration::from_secs(2);
 const ACTION_TICK: Duration = Duration::from_millis(16);
 const MAINTENANCE_TICK: Duration = Duration::from_millis(100);
+const OUTPUT_REFRESH_ENV: &str = "ASHER_OUTPUT_REFRESH_MILLIHERTZ";
 
 pub fn run(config: AsherConfig) -> Result<(), Box<dyn Error>> {
     let (actions_tx, actions_rx) = mpsc::channel();
     let shell = Rc::new(RefCell::new(WebShell::new(config, actions_tx, actions_rx)?));
     shell.borrow_mut().sync_surfaces();
 
+    let animation_tick = animation_tick_interval();
     let mut last_maintenance = Instant::now();
     loop {
-        shell.borrow_mut().tick_actions();
-        if last_maintenance.elapsed() >= MAINTENANCE_TICK {
-            shell.borrow_mut().tick();
-            last_maintenance = Instant::now();
-        }
-        thread::sleep(ACTION_TICK);
+        let animating = {
+            let mut shell = shell.borrow_mut();
+            shell.tick_actions();
+            if last_maintenance.elapsed() >= MAINTENANCE_TICK {
+                shell.tick();
+                last_maintenance = Instant::now();
+            }
+            shell.surfaces.is_animating()
+        };
+        thread::sleep(if animating {
+            animation_tick
+        } else {
+            ACTION_TICK
+        });
     }
+}
+
+fn animation_tick_interval() -> Duration {
+    let millihertz = std::env::var(OUTPUT_REFRESH_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|refresh| *refresh > 0)
+        .unwrap_or(60_000);
+    Duration::from_nanos((1_000_000_000_000u64 + millihertz / 2) / millihertz)
 }
 
 struct WebShell {
@@ -85,10 +102,9 @@ struct WebShell {
     control: Option<ShellControlServer>,
     app_processes: Vec<Child>,
     launcher_command: String,
-    overview_visible: bool,
+    start_menu_visible: bool,
     quick_visible: bool,
     date_visible: bool,
-    chrome_visibility: ChromeVisibility,
     dock_menu_open: bool,
     dock_menu_command: Option<String>,
     dock_menu_x: Option<i32>,
@@ -107,7 +123,7 @@ impl WebShell {
             self.handle_action(action);
         }
 
-        if handled_action || self.overview_visible {
+        if handled_action || self.start_menu_visible {
             self.sync_chrome();
             self.sync_surfaces();
         }
@@ -141,7 +157,7 @@ impl WebShell {
                             self.launch_default_app(app)
                         }
                         asher_ipc::ShellControlRequest::OpenLauncher => self.open_launcher(),
-                        asher_ipc::ShellControlRequest::ToggleOverview => self.toggle_overview(),
+                        asher_ipc::ShellControlRequest::ToggleStartMenu => self.toggle_start_menu(),
                         asher_ipc::ShellControlRequest::CloseTransientPopovers => {
                             self.close_transient_popovers()
                         }
@@ -156,21 +172,23 @@ impl WebShell {
         match action {
             WebShellAction::OpenLauncher => self.open_launcher(),
             WebShellAction::LaunchDefaultApp { app } => self.launch_default_app(app),
-            WebShellAction::ToggleOverview => self.toggle_overview(),
+            WebShellAction::ToggleStartMenu => self.toggle_start_menu(),
             WebShellAction::ToggleQuickSettings => self.toggle_quick_settings(),
             WebShellAction::ToggleDateCenter => self.toggle_date_center(),
             WebShellAction::WorkspaceSwitch { workspace } => {
                 self.apply_model_result(switch_workspace(workspace_id(workspace)));
-                self.hide_chrome();
+                self.close_transient_popovers();
             }
             WebShellAction::WorkspaceRelative { offset } => {
                 self.apply_model_result(switch_relative_workspace(offset))
             }
-            WebShellAction::WorkspaceNew => self.new_workspace_from_overview(),
+            WebShellAction::WorkspaceNew => self.new_workspace_from_start_menu(),
             WebShellAction::WorkspaceSetProfile { profile } => {
                 self.set_active_workspace_profile(profile)
             }
             WebShellAction::WindowActivate { window } => self.activate_task_window(window),
+            WebShellAction::WindowClose { window } => self.close_task_window(window),
+            WebShellAction::WindowMinimize { window } => self.minimize_task_window(window),
             WebShellAction::WindowMove { window, workspace } => self.apply_model_result(
                 move_window_to_workspace(window_id(window), workspace_id(workspace)),
             ),
@@ -183,9 +201,10 @@ impl WebShell {
                 icon,
             } => self.pin_dock_app(label, command, icon),
             WebShellAction::DockUnpin { command } => self.unpin_dock_app(&command),
+            WebShellAction::DockForceQuit { command } => self.force_quit_dock_app(command),
             WebShellAction::DockReorder { commands } => self.reorder_dock_apps(commands),
             WebShellAction::AppLaunch { command } => {
-                self.hide_chrome();
+                self.close_transient_popovers();
                 self.launch(command);
             }
             WebShellAction::TrayActivate { index } => self.activate_tray(index, false),
@@ -235,7 +254,7 @@ impl WebShell {
     }
 
     fn open_settings_page(&mut self, page: QuickSettingsPage) {
-        self.hide_chrome();
+        self.close_transient_popovers();
         let command = settings_command(&self.config.default_apps.settings, page.as_settings_arg());
         if !command.trim().is_empty() {
             self.launch(command);
@@ -243,7 +262,7 @@ impl WebShell {
     }
 
     fn open_launcher(&mut self) {
-        self.hide_chrome();
+        self.close_transient_popovers();
         if self.launcher_command.trim().is_empty() {
             return;
         }
@@ -272,7 +291,7 @@ impl WebShell {
             asher_ipc::DefaultAppKind::Browser => self.config.default_apps.browser.clone(),
             asher_ipc::DefaultAppKind::Settings => String::new(),
         };
-        self.hide_chrome();
+        self.close_transient_popovers();
         if !command.trim().is_empty() {
             self.launch(command);
         }
@@ -285,7 +304,7 @@ impl WebShell {
             SessionCommand::Reboot => self.config.session.reboot_command.clone(),
             SessionCommand::PowerOff => self.config.session.poweroff_command.clone(),
         };
-        self.hide_chrome();
+        self.close_transient_popovers();
         match spawn_command(&command, self.model.xwayland_display.as_deref()) {
             Ok(child) => {
                 debug!(pid = child.id(), command, "started session command");
@@ -295,78 +314,72 @@ impl WebShell {
         }
     }
 
-    fn toggle_overview(&mut self) {
+    fn toggle_start_menu(&mut self) {
         self.quick_visible = false;
         self.date_visible = false;
-        self.overview_visible = !self.overview_visible;
+        self.start_menu_visible = !self.start_menu_visible;
         self.sync_chrome();
         self.sync_surfaces();
         self.surfaces.quick.set_visible(false);
         self.surfaces.date.set_visible(false);
-        self.surfaces.overview.set_visible(self.overview_visible);
+        self.surfaces
+            .start_menu
+            .set_visible(self.start_menu_visible);
     }
 
     fn toggle_quick_settings(&mut self) {
         self.date_visible = false;
-        self.overview_visible = false;
+        self.start_menu_visible = false;
         self.quick_visible = !self.quick_visible;
         self.refresh_status_now();
         self.sync_chrome();
         self.sync_surfaces();
         self.surfaces.quick.set_visible(self.quick_visible);
         self.surfaces.date.set_visible(false);
-        self.surfaces.overview.set_visible(false);
+        self.surfaces.start_menu.set_visible(false);
     }
     fn toggle_date_center(&mut self) {
         self.quick_visible = false;
-        self.overview_visible = false;
+        self.start_menu_visible = false;
         self.date_visible = !self.date_visible;
         self.sync_chrome();
         self.sync_surfaces();
         self.surfaces.date.set_visible(self.date_visible);
         self.surfaces.quick.set_visible(false);
-        self.surfaces.overview.set_visible(false);
+        self.surfaces.start_menu.set_visible(false);
     }
 
     fn close_transient_popovers(&mut self) {
         self.quick_visible = false;
         self.date_visible = false;
+        self.start_menu_visible = false;
         self.close_dock_menu();
         self.sync_chrome();
         self.sync_surfaces();
         self.surfaces.quick.set_visible(false);
         self.surfaces.date.set_visible(false);
+        self.surfaces.start_menu.set_visible(false);
     }
 
-    fn new_workspace_from_overview(&mut self) {
+    fn new_workspace_from_start_menu(&mut self) {
         let previous = self.model.active_workspace.clone();
         self.apply_model_result(switch_relative_workspace(1));
         if self.model.active_workspace != previous {
-            self.hide_chrome();
+            self.close_transient_popovers();
         }
     }
 
     fn set_active_workspace_profile(&mut self, profile: String) {
         let profile = profile_id(profile);
         if profile == self.model.active_profile {
-            self.hide_chrome();
+            self.close_transient_popovers();
             return;
         }
         self.apply_model_result(set_workspace_profile(
             self.model.active_workspace.clone(),
             profile,
         ));
-        self.hide_chrome();
-    }
-
-    fn hide_chrome(&mut self) {
-        self.overview_visible = false;
-        self.quick_visible = false;
-        self.date_visible = false;
-        self.close_dock_menu();
-        self.surfaces.overview.set_visible(false);
-        self.surfaces.quick.set_visible(false);
-        self.surfaces.date.set_visible(false);
+        self.close_transient_popovers();
     }
     fn activate_task_window(&mut self, window: u64) {
         let id = window_id(window);
@@ -381,7 +394,17 @@ impl WebShell {
             activate_window(id)
         };
         self.apply_model_result(result);
-        self.hide_chrome();
+        self.close_transient_popovers();
+    }
+
+    fn close_task_window(&mut self, window: u64) {
+        self.apply_model_result(close_window(window_id(window)));
+        self.close_dock_menu();
+    }
+
+    fn minimize_task_window(&mut self, window: u64) {
+        self.apply_model_result(minimize_window(window_id(window)));
+        self.close_dock_menu();
     }
 
     fn activate_dock_command(&mut self, command: String) {
@@ -451,6 +474,21 @@ impl WebShell {
                 self.app_processes.push(child);
             }
             Err(error) => warn!(%error, command, "failed to launch dock app"),
+        }
+    }
+
+    fn force_quit_dock_app(&mut self, command: String) {
+        self.close_dock_menu();
+        let Some(pattern) = command
+            .split_whitespace()
+            .next()
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        match Command::new("pkill").args(["-TERM", "-f", pattern]).spawn() {
+            Ok(child) => self.app_processes.push(child),
+            Err(error) => warn!(%error, command, "failed to force quit dock app"),
         }
     }
 

@@ -11,8 +11,7 @@ use asher_layout::ProfileId;
 use clap::ValueEnum;
 use fenestra_cef::{
     BridgeCommand, BridgeCommandDescriptor, BridgeError, BridgeResponse, BridgeResult,
-    FenestraWindow, RuntimeConfig, RuntimeMode, WebViewSecurity, WindowBackgroundEffect,
-    WindowRegion, WindowRegionRect,
+    FenestraWindow, RuntimeConfig, RuntimeMode, WebViewSecurity, WindowRegion, WindowRegionRect,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -25,7 +24,7 @@ const WINDOW_HEIGHT: u32 = 660;
 const MIN_WINDOW_WIDTH: u32 = 820;
 const MIN_WINDOW_HEIGHT: u32 = 560;
 const SIDEBAR_WIDTH: i32 = 264;
-const TITLEBAR_HEIGHT: i32 = 48;
+const TITLEBAR_HEIGHT: i32 = 56;
 const WINDOW_RADIUS: i32 = 18;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -88,7 +87,6 @@ pub fn run(config: AsherConfig, page: SettingsPage) -> Result<(), String> {
 }
 
 fn build_window(config: AsherConfig, page: SettingsPage) -> FenestraWindow {
-    let material = background_effect(config.appearance.material_mode);
     let state = Arc::new(Mutex::new(config));
     let mut window = FenestraWindow::new()
         .title("Asher Settings")
@@ -96,32 +94,25 @@ fn build_window(config: AsherConfig, page: SettingsPage) -> FenestraWindow {
         .min_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .frameless()
         .resizable(false)
-        .glass_material(material)
+        .glass()
         .runtime(runtime_config())
         .security(WebViewSecurity::default())
-        .blur_region(WindowRegion::adaptive_rounded_left(
-            SIDEBAR_WIDTH,
-            WINDOW_RADIUS,
-        ))
+        .blur_region(WindowRegion::adaptive_full())
         .input_region(WindowRegion::adaptive_rounded_rect(WINDOW_RADIUS))
-        .drag_region(WindowRegionRect::new(210, 0, SIDEBAR_WIDTH - 210, 92))
+        .drag_region(WindowRegionRect::new(0, 0, SIDEBAR_WIDTH, TITLEBAR_HEIGHT))
         .drag_region(WindowRegionRect::new(
-            SIDEBAR_WIDTH + 280,
+            SIDEBAR_WIDTH,
             0,
             i32::MAX,
             TITLEBAR_HEIGHT,
-        ));
+        ))
+        .drag_exclusion_region(WindowRegionRect::new(12, 10, 104, 34))
+        .drag_exclusion_region(WindowRegionRect::new(SIDEBAR_WIDTH + 14, 8, 84, 40));
 
     window = register_bridge(window, state, page);
     match settings_entry(page) {
         SettingsEntry::Dev(url) => window.dev_url(url),
         SettingsEntry::File(path) => window.entry(path),
-    }
-}
-
-fn background_effect(material: MaterialModePreference) -> WindowBackgroundEffect {
-    match material {
-        MaterialModePreference::Glass => WindowBackgroundEffect::Glass,
     }
 }
 

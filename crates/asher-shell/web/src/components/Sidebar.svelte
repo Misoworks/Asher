@@ -27,7 +27,7 @@
     <button type="button" class="sidebar-action" aria-label="Open launcher" onclick={() => sendAction({ type: "open-launcher" })}>
       <Icon name="search" />
     </button>
-    <button type="button" class="sidebar-action" aria-label="Open overview" onclick={() => sendAction({ type: "toggle-overview" })}>
+    <button type="button" class="sidebar-action" aria-label="Open Start menu" onclick={() => sendAction({ type: "toggle-start-menu" })}>
       <Icon name="app" />
     </button>
     <button
