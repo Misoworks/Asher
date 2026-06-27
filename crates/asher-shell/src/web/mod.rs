@@ -100,7 +100,7 @@ struct WebShell {
     surfaces: WebSurfaces,
     actions_rx: Receiver<WebShellAction>,
     control: Option<ShellControlServer>,
-    app_processes: Vec<Child>,
+    app_processes: Vec<LaunchedProcess>,
     launcher_command: String,
     start_menu_visible: bool,
     quick_visible: bool,
@@ -112,6 +112,42 @@ struct WebShell {
     last_status_refresh: Instant,
     last_config_refresh: Instant,
     last_snapshot: String,
+}
+
+struct LaunchedProcess {
+    command: String,
+    child: Child,
+    started_at: Instant,
+}
+
+impl LaunchedProcess {
+    fn new(command: String, child: Child) -> Self {
+        Self {
+            command,
+            child,
+            started_at: Instant::now(),
+        }
+    }
+
+    fn is_running_or_report_exit(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() || self.started_at.elapsed() < Duration::from_secs(2) {
+                    warn!(
+                        command = %self.command,
+                        %status,
+                        "launched app exited"
+                    );
+                }
+                false
+            }
+            Ok(None) => true,
+            Err(error) => {
+                warn!(command = %self.command, %error, "failed to poll launched app");
+                false
+            }
+        }
+    }
 }
 
 impl WebShell {
@@ -134,7 +170,7 @@ impl WebShell {
         self.tick_actions();
 
         self.app_processes
-            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
+            .retain_mut(LaunchedProcess::is_running_or_report_exit);
         self.tray.refresh();
         self.notifications.refresh();
         self.refresh_model();
@@ -272,7 +308,8 @@ impl WebShell {
         ) {
             Ok(child) => {
                 debug!(pid = child.id(), command = %self.launcher_command, "launched app launcher");
-                self.app_processes.push(child);
+                self.app_processes
+                    .push(LaunchedProcess::new(self.launcher_command.clone(), child));
             }
             Err(error) => {
                 warn!(%error, command = %self.launcher_command, "failed to launch app launcher")
@@ -308,7 +345,8 @@ impl WebShell {
         match spawn_command(&command, self.model.xwayland_display.as_deref()) {
             Ok(child) => {
                 debug!(pid = child.id(), command, "started session command");
-                self.app_processes.push(child);
+                self.app_processes
+                    .push(LaunchedProcess::new(command.clone(), child));
             }
             Err(error) => warn!(%error, command, "failed to start session command"),
         }
@@ -471,7 +509,8 @@ impl WebShell {
         match spawn_command(&command, self.model.xwayland_display.as_deref()) {
             Ok(child) => {
                 debug!(pid = child.id(), command, "launched dock app");
-                self.app_processes.push(child);
+                self.app_processes
+                    .push(LaunchedProcess::new(command.clone(), child));
             }
             Err(error) => warn!(%error, command, "failed to launch dock app"),
         }
@@ -487,7 +526,10 @@ impl WebShell {
             return;
         };
         match Command::new("pkill").args(["-TERM", "-f", pattern]).spawn() {
-            Ok(child) => self.app_processes.push(child),
+            Ok(child) => self.app_processes.push(LaunchedProcess::new(
+                format!("pkill -TERM -f {pattern}"),
+                child,
+            )),
             Err(error) => warn!(%error, command, "failed to force quit dock app"),
         }
     }

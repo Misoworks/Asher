@@ -28,7 +28,7 @@
       <Icon name="search" />
     </button>
     <button type="button" class="sidebar-action" aria-label="Open Start menu" onclick={() => sendAction({ type: "toggle-start-menu" })}>
-      <Icon name="app" />
+      <Icon name="menu" />
     </button>
     <button
       type="button"

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{env, path::Path};
 
 const WAYLAND_FLAG: &str = "--ozone-platform=wayland";
 const DISABLE_VULKAN_FLAG: &str = "--disable-vulkan";
@@ -15,12 +15,14 @@ pub fn command_for_shell(command: &str) -> String {
     }
 
     let mut prepared = command.to_string();
-    append_flag(
-        &mut prepared,
-        command,
-        "--user-data-dir",
-        &profile_flag(name),
-    );
+    if !uses_existing_chrome_profile(command) {
+        append_flag(
+            &mut prepared,
+            command,
+            "--user-data-dir",
+            &profile_flag(name),
+        );
+    }
     append_flag(&mut prepared, command, "--no-first-run", "--no-first-run");
     append_flag(&mut prepared, command, "--ozone-platform", WAYLAND_FLAG);
     append_flag(
@@ -36,7 +38,9 @@ pub fn command_for_shell(command: &str) -> String {
         "--disable-renderer-accessibility",
         DISABLE_ACCESSIBILITY_FLAG,
     );
-    append_flag(&mut prepared, command, "--new-window", "--new-window");
+    if !is_chrome_app(command) {
+        append_flag(&mut prepared, command, "--new-window", "--new-window");
+    }
     prepared
 }
 
@@ -95,9 +99,25 @@ fn is_chromium_command(command: &str) -> bool {
     )
 }
 
+fn uses_existing_chrome_profile(command: &str) -> bool {
+    is_chrome_app(command)
+        || command
+            .split_whitespace()
+            .any(|part| part.starts_with("--profile-directory="))
+}
+
+fn is_chrome_app(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .any(|part| part.starts_with("--app-id="))
+}
+
 fn profile_flag(command: &str) -> String {
+    let state_home = env::var("XDG_STATE_HOME")
+        .or_else(|_| env::var("HOME").map(|home| format!("{home}/.local/state")))
+        .unwrap_or_else(|_| "/tmp".to_string());
     format!(
-        "--user-data-dir=\"${{XDG_STATE_HOME:-$HOME/.local/state}}/asher/{}\"",
+        "--user-data-dir={state_home}/asher/{}",
         profile_dir(command)
     )
 }
@@ -143,6 +163,19 @@ mod tests {
 
         assert!(command.contains("--user-data-dir=/tmp/profile"));
         assert_eq!(command.matches("--user-data-dir").count(), 1);
+    }
+
+    #[test]
+    fn keeps_chrome_app_profile() {
+        let command = command_for_shell(
+            "/opt/google/chrome/google-chrome --profile-directory=Default --app-id=abc",
+        );
+
+        assert!(command.contains("--profile-directory=Default"));
+        assert!(command.contains("--app-id=abc"));
+        assert!(!command.contains("--user-data-dir="));
+        assert!(!command.contains("--new-window"));
+        assert!(command.contains("--ozone-platform=wayland"));
     }
 
     #[test]

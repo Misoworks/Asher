@@ -111,6 +111,10 @@ pub(super) fn resize_edge_at(
     window: &ManagedWindow,
     point: Point<f64, Logical>,
 ) -> Option<ResizeEdge> {
+    if !contains(window, point) {
+        return None;
+    }
+
     let location = window.location.to_f64();
     let right = location.x + window.size.w as f64;
     let bottom = location.y + window.titlebar_height() as f64 + window.size.h as f64;

@@ -97,7 +97,7 @@ fn build_window(config: AsherConfig, page: SettingsPage) -> FenestraWindow {
         .glass()
         .runtime(runtime_config())
         .security(WebViewSecurity::default())
-        .blur_region(WindowRegion::adaptive_full())
+        .blur_region(WindowRegion::adaptive_rounded_rect(WINDOW_RADIUS))
         .input_region(WindowRegion::adaptive_rounded_rect(WINDOW_RADIUS))
         .drag_region(WindowRegionRect::new(0, 0, SIDEBAR_WIDTH, TITLEBAR_HEIGHT))
         .drag_region(WindowRegionRect::new(

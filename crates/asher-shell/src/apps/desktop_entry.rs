@@ -159,6 +159,6 @@ fn clean_exec(exec: &str) -> Option<String> {
         }
     }
 
-    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cleaned = cleaned.trim().to_string();
     (!cleaned.is_empty()).then_some(cleaned)
 }

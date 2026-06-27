@@ -1,7 +1,7 @@
 use crate::{
     layers::{BlurLayer, LayerRenderTarget},
     render::window_chrome_elements_for_window,
-    scene_blur::{self, SceneBlurCache},
+    scene_blur::{self, BlurElement, SceneBlurCache},
     state::KestrelState,
     window::ManagedWindow,
     window_clip::{RoundedWindowElement, window_elements_for_window},
@@ -39,6 +39,15 @@ pub struct SceneRenderRequest<'a> {
     pub overlay_layer: &'a [SurfaceElement],
     pub loading: Option<MemoryElement>,
     pub debug: Option<MemoryElement>,
+}
+
+fn draw_blur_elements(
+    frame: &mut <GlesRenderer as RendererSuper>::Frame<'_, '_>,
+    elements: &[BlurElement],
+    damage: &[Rectangle<i32, Physical>],
+) -> Result<(), GlesError> {
+    draw_render_elements::<GlesRenderer, f64, BlurElement>(frame, 1.0, elements, damage)?;
+    Ok(())
 }
 
 pub fn render_scene(
@@ -119,9 +128,9 @@ fn render_flat_scene_with_cached_layer_blur(
     draw_render_elements(&mut frame, 1.0, request.bottom_layer, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.windows, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.window_chrome, request.damage)?;
-    draw_render_elements(&mut frame, 1.0, &top_blur, request.damage)?;
+    draw_blur_elements(&mut frame, &top_blur, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.top_layer, request.damage)?;
-    draw_render_elements(&mut frame, 1.0, &overlay_blur, request.damage)?;
+    draw_blur_elements(&mut frame, &overlay_blur, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.overlay_layer, request.damage)?;
     draw_optional_memory(&mut frame, request.loading.as_ref(), request.damage)?;
     draw_optional_memory(&mut frame, request.debug.as_ref(), request.damage)?;
@@ -175,14 +184,13 @@ fn render_staged_scene(
             renderer,
             framebuffer,
             request.output_size,
-            BlurLayer::Window,
             &targets,
             request.blur_damage,
             request.blur_enabled,
         )?;
         let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
         let blur_damage = blur_target_damage(request.output_size, &targets);
-        draw_render_elements(&mut frame, 1.0, &blur, &blur_damage)?;
+        draw_blur_elements(&mut frame, &blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, &window, request.damage)?;
         draw_render_elements(&mut frame, 1.0, &chrome, request.damage)?;
         let _ = frame.finish()?;
@@ -201,7 +209,6 @@ fn render_staged_scene(
         renderer,
         framebuffer,
         request.output_size,
-        BlurLayer::Top,
         request.top_targets,
         request.blur_damage,
         request.blur_enabled,
@@ -209,7 +216,7 @@ fn render_staged_scene(
     {
         let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
         let blur_damage = blur_target_damage(request.output_size, request.top_targets);
-        draw_render_elements(&mut frame, 1.0, &top_blur, &blur_damage)?;
+        draw_blur_elements(&mut frame, &top_blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, request.top_layer, request.damage)?;
         let _ = frame.finish()?;
     }
@@ -219,14 +226,13 @@ fn render_staged_scene(
         renderer,
         framebuffer,
         request.output_size,
-        BlurLayer::Overlay,
         request.overlay_targets,
         request.blur_damage,
         request.blur_enabled,
     )?;
     let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
     let blur_damage = blur_target_damage(request.output_size, request.overlay_targets);
-    draw_render_elements(&mut frame, 1.0, &overlay_blur, &blur_damage)?;
+    draw_blur_elements(&mut frame, &overlay_blur, &blur_damage)?;
     draw_render_elements(&mut frame, 1.0, request.overlay_layer, request.damage)?;
     draw_optional_memory(&mut frame, request.loading.as_ref(), request.damage)?;
     draw_optional_memory(&mut frame, request.debug.as_ref(), request.damage)?;

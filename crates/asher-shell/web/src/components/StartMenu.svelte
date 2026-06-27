@@ -26,6 +26,7 @@
 
   let appPage = $state(0);
   let searchInputElement: HTMLInputElement | undefined;
+  let focusFrame: number | undefined;
   let lastPageWheelAt = 0;
 
   const searching = $derived(Boolean(query.trim()));
@@ -48,14 +49,30 @@
       }
     };
     window.addEventListener("fenestra:asher.surface-open", surfaceOpen);
-    return () => window.removeEventListener("fenestra:asher.surface-open", surfaceOpen);
+    return () => {
+      window.removeEventListener("fenestra:asher.surface-open", surfaceOpen);
+      cancelSearchFocus();
+    };
   });
 
   function focusSearch() {
-    requestAnimationFrame(() => {
-      searchInputElement?.focus({ preventScroll: true });
-      searchInputElement?.select();
+    cancelSearchFocus();
+    focusFrame = requestAnimationFrame(() => {
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = undefined;
+        const input = searchInputElement;
+        if (!input) return;
+        input.focus({ preventScroll: true });
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      });
     });
+  }
+
+  function cancelSearchFocus() {
+    if (focusFrame === undefined) return;
+    cancelAnimationFrame(focusFrame);
+    focusFrame = undefined;
   }
 
   const captureSearchInput: Attachment<HTMLInputElement> = (node) => {
@@ -206,7 +223,7 @@
 
 <section class="shell-start-menu">
   <header class="start-menu-top">
-    <label class="start-menu-search">
+    <label class="start-menu-search" onpointerdown={focusSearch}>
       <Icon name="search" />
       <input
         {@attach captureSearchInput}

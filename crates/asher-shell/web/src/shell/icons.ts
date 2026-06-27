@@ -55,7 +55,7 @@ import {
 const icons: Record<string, IconNode> = {
   accessibility: Accessibility,
   activity: Activity,
-  app: Menu,
+  app: AppWindow,
   "arrow-down": ArrowDown,
   "arrow-up": ArrowUp,
   battery: Battery,
@@ -77,6 +77,7 @@ const icons: Record<string, IconNode> = {
   keyboard: Keyboard,
   laptop: Laptop,
   lock: Lock,
+  menu: Menu,
   mic: Mic,
   minimize: Minus,
   moon: Moon,

@@ -1,6 +1,5 @@
 use super::{
     MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, ResizeEdge, WindowFrameControl, WindowRestoreState,
-    WindowVisualExtents,
 };
 use crate::{
     state::KestrelState,
@@ -17,7 +16,6 @@ use smithay::{
 const MAXIMIZED_MARGIN: i32 = 0;
 const TOP_PANEL_HEIGHT: i32 = 34;
 const BOTTOM_PANEL_HEIGHT: i32 = 48;
-const FLOATING_MARGIN: i32 = 8;
 
 #[derive(Debug, Clone)]
 pub enum WindowGrab {
@@ -289,18 +287,13 @@ impl KestrelState {
             .window(id)
             .map(|window| window.titlebar_height())
             .unwrap_or_default();
-        let extents = self
-            .windows
-            .window(id)
-            .map(|window| window.visual_extents())
-            .unwrap_or_default();
         let from = self.windows.window(id).map(|window| window.geometry());
         let geometry = if fullscreen {
             self.fit_fullscreen_window_geometry(geometry)
         } else if maximized {
             self.fit_maximized_window_geometry(geometry, titlebar_height)
         } else {
-            self.fit_window_geometry(geometry, titlebar_height, extents)
+            self.fit_window_geometry(geometry, titlebar_height)
         };
         let Some((surface, geometry)) = self.windows.set_geometry(id, geometry) else {
             return;
@@ -347,17 +340,12 @@ impl KestrelState {
             .window(id)
             .map(|window| window.titlebar_height())
             .unwrap_or_default();
-        let extents = self
-            .windows
-            .window(id)
-            .map(|window| window.visual_extents())
-            .unwrap_or_default();
         let geometry = if fullscreen {
             self.fit_fullscreen_window_geometry(geometry)
         } else if maximized {
             self.fit_maximized_window_geometry(geometry, titlebar_height)
         } else {
-            self.fit_window_geometry(geometry, titlebar_height, extents)
+            self.fit_window_geometry(geometry, titlebar_height)
         };
         let Some((surface, geometry)) = self.windows.set_geometry(id, geometry) else {
             return;
@@ -387,31 +375,23 @@ impl KestrelState {
     }
 
     pub fn fit_initial_window_geometry(&self, geometry: Rect) -> Rect {
-        self.fit_window_geometry(geometry, 0, WindowVisualExtents::default())
+        self.fit_window_geometry(geometry, 0)
     }
 
-    fn fit_window_geometry(
-        &self,
-        geometry: Rect,
-        titlebar_height: i32,
-        extents: WindowVisualExtents,
-    ) -> Rect {
-        let min_x = FLOATING_MARGIN;
-        let top = self.reserved_top();
-        let bottom = self.reserved_bottom();
-        let min_y = if top == 0 { FLOATING_MARGIN } else { top };
-        let max_right = (self.output_size().w - FLOATING_MARGIN).max(min_x + MIN_WINDOW_WIDTH);
-        let max_bottom =
-            (self.output_size().h - bottom).max(min_y + MIN_WINDOW_HEIGHT + titlebar_height);
-        let max_width = (max_right - min_x - extents.left - extents.right).max(MIN_WINDOW_WIDTH);
-        let max_height = (max_bottom - min_y - titlebar_height - extents.top - extents.bottom)
-            .max(MIN_WINDOW_HEIGHT);
+    fn fit_window_geometry(&self, geometry: Rect, titlebar_height: i32) -> Rect {
+        let min_x = 0;
+        let min_y = 0;
+        let max_right = self.output_size().w.max(min_x + MIN_WINDOW_WIDTH);
+        let max_bottom = self
+            .output_size()
+            .h
+            .max(min_y + MIN_WINDOW_HEIGHT + titlebar_height);
+        let max_width = (max_right - min_x).max(MIN_WINDOW_WIDTH);
+        let max_height = (max_bottom - min_y - titlebar_height).max(MIN_WINDOW_HEIGHT);
         let width = geometry.width.clamp(MIN_WINDOW_WIDTH, max_width);
         let height = geometry.height.clamp(MIN_WINDOW_HEIGHT, max_height);
-        let min_x = min_x + extents.left;
-        let min_y = min_y + extents.top;
-        let max_x = (max_right - width - extents.right).max(min_x);
-        let max_y = (max_bottom - titlebar_height - height - extents.bottom).max(min_y);
+        let max_x = (max_right - width).max(min_x);
+        let max_y = (max_bottom - titlebar_height - height).max(min_y);
 
         Rect::new(
             geometry.x.clamp(min_x, max_x),

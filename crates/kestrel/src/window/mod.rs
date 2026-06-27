@@ -49,14 +49,6 @@ pub struct WindowRestoreState {
     pub state: WindowState,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct WindowVisualExtents {
-    pub left: i32,
-    pub right: i32,
-    pub top: i32,
-    pub bottom: i32,
-}
-
 impl ManagedWindow {
     pub fn geometry(&self) -> Rect {
         Rect::new(self.location.x, self.location.y, self.size.w, self.size.h)
@@ -106,31 +98,6 @@ impl ManagedWindow {
             geometry
         } else {
             fallback
-        }
-    }
-
-    pub fn visual_extents(&self) -> WindowVisualExtents {
-        let surface_geometry = self.surface_geometry();
-        let surface_bounds = bbox_from_surface_tree(self.surface.wl_surface(), (0, 0));
-        if surface_bounds.is_empty() {
-            return WindowVisualExtents::default();
-        }
-
-        let titlebar_height = self.titlebar_height();
-        let frame_width = self.size.w;
-        let frame_height = self.size.h + titlebar_height;
-        let surface_x = surface_bounds.loc.x - surface_geometry.loc.x;
-        let surface_y = titlebar_height + surface_bounds.loc.y - surface_geometry.loc.y;
-        let visual_left = surface_x.min(0);
-        let visual_top = surface_y.min(0);
-        let visual_right = frame_width.max(surface_x + surface_bounds.size.w);
-        let visual_bottom = frame_height.max(surface_y + surface_bounds.size.h);
-
-        WindowVisualExtents {
-            left: -visual_left,
-            right: visual_right - frame_width,
-            top: -visual_top,
-            bottom: visual_bottom - frame_height,
         }
     }
 

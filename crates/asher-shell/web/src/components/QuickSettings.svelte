@@ -9,7 +9,6 @@
 
   let { snapshot }: { snapshot: ShellSnapshot } = $props();
   let powerMenuOpen = $state(false);
-  let nativePowerMenu = $state(false);
   const showNetwork = $derived(Boolean(snapshot.status.network));
   const showPower = $derived(Boolean(snapshot.status.battery));
   const showVolume = $derived(Boolean(snapshot.status.audio));
@@ -23,25 +22,16 @@
     const closePowerMenu = () => {
       window.fenestra?.popup?.close?.();
       powerMenuOpen = false;
-      nativePowerMenu = false;
     };
     window.addEventListener("fenestra:asher.surface-open", closePowerMenu);
     window.addEventListener("fenestra:asher.surface-close", closePowerMenu);
     window.addEventListener("fenestra:popup.close", closePowerMenu);
-    window.addEventListener("fenestra:popup.open", showNativePowerMenu);
     return () => {
       window.removeEventListener("fenestra:asher.surface-open", closePowerMenu);
       window.removeEventListener("fenestra:asher.surface-close", closePowerMenu);
       window.removeEventListener("fenestra:popup.close", closePowerMenu);
-      window.removeEventListener("fenestra:popup.open", showNativePowerMenu);
     };
   });
-
-  function showNativePowerMenu() {
-    if (powerMenuOpen) {
-      nativePowerMenu = true;
-    }
-  }
 
   function setVolume(percent: number) {
     sendAction({ type: "quick-set-volume", percent });
@@ -59,24 +49,14 @@
     sendAction({ type: "notification-do-not-disturb", enabled: !snapshot.doNotDisturb });
   }
 
-  function sessionCommand(command: "lock" | "suspend" | "reboot" | "power-off") {
-    powerMenuOpen = false;
-    nativePowerMenu = false;
-    window.fenestra?.popup?.close?.();
-    sendAction({ type: "session-command", command });
-  }
-
   function togglePowerMenu(event: MouseEvent) {
     const popup = window.fenestra?.popup;
     if (!popup?.open || !popup.close) {
-      powerMenuOpen = !powerMenuOpen;
-      nativePowerMenu = false;
       return;
     }
     if (powerMenuOpen) {
       popup.close();
       powerMenuOpen = false;
-      nativePowerMenu = false;
       return;
     }
     const target = event.currentTarget;
@@ -94,11 +74,9 @@
       html: sessionMenuDocument(),
     });
     powerMenuOpen = true;
-    nativePowerMenu = false;
-    void Promise.resolve(opened)
-      .catch(() => {
-        nativePowerMenu = false;
-      });
+    void Promise.resolve(opened).catch(() => {
+      powerMenuOpen = false;
+    });
   }
 
   function sessionMenuDocument() {
@@ -316,32 +294,6 @@
       <ControlSlider label="Brightness" icon="sun" value={brightness} index={3} onChange={setBrightness} />
     {/if}
   </div>
-
-  <div class="session-actions" class:is-open={powerMenuOpen && !nativePowerMenu} aria-label="Session controls" aria-hidden={!powerMenuOpen || nativePowerMenu}>
-    <button type="button" class="session-action" style="--index: 0" tabindex={powerMenuOpen && !nativePowerMenu ? 0 : -1} onclick={() => sessionCommand("lock")}>
-      <span class="session-action-icon"><Icon name="lock" /></span>
-      <span>Lock</span>
-    </button>
-    <button type="button" class="session-action" style="--index: 1" tabindex={powerMenuOpen && !nativePowerMenu ? 0 : -1} onclick={() => sessionCommand("suspend")}>
-      <span class="session-action-icon"><Icon name="moon" /></span>
-      <span>Suspend</span>
-    </button>
-    <button type="button" class="session-action" style="--index: 2" tabindex={powerMenuOpen && !nativePowerMenu ? 0 : -1} onclick={() => sessionCommand("reboot")}>
-      <span class="session-action-icon"><Icon name="reboot" /></span>
-      <span>Restart</span>
-    </button>
-    <button
-      type="button"
-      class="session-action is-danger"
-      style="--index: 3"
-      tabindex={powerMenuOpen && !nativePowerMenu ? 0 : -1}
-      onclick={() => sessionCommand("power-off")}
-    >
-      <span class="session-action-icon"><Icon name="power" /></span>
-      <span>Power Off</span>
-    </button>
-  </div>
-
   {#if snapshot.debugOverlay}
     <DebugMeter surface="QS" />
   {/if}

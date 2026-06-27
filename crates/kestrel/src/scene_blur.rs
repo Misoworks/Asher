@@ -1,27 +1,95 @@
-use crate::{
-    blur_material,
-    layers::{BlurLayer, LayerMaterial, LayerRenderTarget},
-};
+use crate::layers::{BlurLayer, LayerMaterial, LayerRenderTarget};
 use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            ExportMem, TextureMapping,
-            element::{
-                Kind,
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            Bind, Blit, Frame, Offscreen, Renderer, TextureFilter,
+            element::{Id, Kind, texture::TextureRenderElement},
+            gles::{
+                GlesError, GlesRenderer, GlesTarget, GlesTexProgram, GlesTexture, Uniform,
+                UniformName, UniformType, UniformValue,
             },
-            gles::{GlesError, GlesRenderer, GlesTarget},
         },
     },
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Buffer, Logical, Physical, Point, Rectangle, Size},
+    utils::{Buffer, Logical, Physical, Point, Rectangle, Size, Transform},
 };
 use std::time::Instant;
+
+const BLUR_SHADER: &str = r#"#version 100
+
+//_DEFINES_
+
+#if defined(EXTERNAL)
+#extension GL_OES_EGL_image_external : require
+#endif
+
+precision mediump float;
+#if defined(EXTERNAL)
+uniform samplerExternalOES tex;
+#else
+uniform sampler2D tex;
+#endif
+
+uniform float alpha;
+uniform vec2 texel;
+uniform vec2 target_size;
+uniform float radius;
+varying vec2 v_coords;
+
+#if defined(DEBUG_FLAGS)
+uniform float tint;
+#endif
+
+float hash(vec2 value) {
+    return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123) - 0.5;
+}
+
+float roundedCoverage(vec2 pixel) {
+    if (radius <= 0.0) {
+        return 1.0;
+    }
+
+    vec2 inner_min = vec2(radius);
+    vec2 inner_max = target_size - vec2(radius);
+    vec2 closest = clamp(pixel, inner_min, inner_max);
+    vec2 delta = pixel - closest;
+    float distance = length(delta);
+    return 1.0 - smoothstep(radius - 1.0, radius + 1.0, distance);
+}
+
+void main() {
+    vec4 color = texture2D(tex, v_coords) * 0.18;
+    color += texture2D(tex, v_coords + texel * vec2(1.384615, 0.0)) * 0.16;
+    color += texture2D(tex, v_coords - texel * vec2(1.384615, 0.0)) * 0.16;
+    color += texture2D(tex, v_coords + texel * vec2(0.0, 1.384615)) * 0.16;
+    color += texture2D(tex, v_coords - texel * vec2(0.0, 1.384615)) * 0.16;
+    color += texture2D(tex, v_coords + texel * vec2(1.0, 1.0)) * 0.095;
+    color += texture2D(tex, v_coords + texel * vec2(-1.0, 1.0)) * 0.095;
+    color += texture2D(tex, v_coords + texel * vec2(1.0, -1.0)) * 0.095;
+    color += texture2D(tex, v_coords + texel * vec2(-1.0, -1.0)) * 0.095;
+
+    float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    color.rgb = luma + (color.rgb - vec3(luma)) * 1.04;
+    color.rgb += hash(gl_FragCoord.xy) * 0.0043;
+
+    float coverage = roundedCoverage(v_coords * target_size);
+    color.a = coverage * alpha;
+    color.rgb *= color.a;
+
+#if defined(DEBUG_FLAGS)
+    if (tint == 1.0)
+        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
+#endif
+
+    gl_FragColor = color;
+}
+"#;
 
 #[derive(Default)]
 pub struct SceneBlurCache {
     entries: Vec<SceneBlurCacheEntry>,
+    program: Option<GlesTexProgram>,
 }
 
 impl SceneBlurCache {
@@ -61,7 +129,8 @@ impl SceneBlurCache {
             let Some(rect) = clipped_target_rect(output_size, target) else {
                 return false;
             };
-            !self.has_target(target) || target_is_damaged(rect, damage)
+            self.cached_entry(target)
+                .is_none_or(|entry| entry.rect != rect || target_is_damaged(rect, damage))
         })
     }
 
@@ -71,7 +140,7 @@ impl SceneBlurCache {
         output_size: Size<i32, Physical>,
         _blur_layer: BlurLayer,
         targets: &[LayerRenderTarget],
-    ) -> Result<Vec<MemoryRenderBufferRenderElement<GlesRenderer>>, GlesError> {
+    ) -> Result<Vec<BlurElement>, GlesError> {
         let now = Instant::now();
         let mut elements = Vec::new();
         for target in targets {
@@ -84,12 +153,29 @@ impl SceneBlurCache {
             elements.push(render_element(
                 renderer,
                 rect,
-                &entry.buffer,
+                entry,
                 entry.opacity(now, target.opacity),
-            )?);
+            ));
         }
 
         Ok(elements)
+    }
+
+    fn program(&mut self, renderer: &mut GlesRenderer) -> Result<GlesTexProgram, GlesError> {
+        if let Some(program) = &self.program {
+            return Ok(program.clone());
+        }
+
+        let program = renderer.compile_custom_texture_shader(
+            BLUR_SHADER,
+            &[
+                UniformName::new("texel", UniformType::_2f),
+                UniformName::new("target_size", UniformType::_2f),
+                UniformName::new("radius", UniformType::_1f),
+            ],
+        )?;
+        self.program = Some(program.clone());
+        Ok(program)
     }
 
     fn buffer_for_target(
@@ -100,43 +186,108 @@ impl SceneBlurCache {
         target: &LayerRenderTarget,
         rect: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
-    ) -> Result<(&MemoryRenderBuffer, f32), GlesError> {
+    ) -> Result<(&SceneBlurCacheEntry, f32), GlesError> {
         let now = Instant::now();
         let cached = self.entries.iter().position(|entry| entry.matches(target));
         if let Some(index) = cached
             && !target_is_damaged(rect, damage)
+            && self.entries[index].rect == rect
         {
             self.entries[index].location = target.location;
             self.entries[index].target_opacity = target.opacity;
             let opacity = self.entries[index].opacity(now, target.opacity);
-            return Ok((&self.entries[index].buffer, opacity));
+            return Ok((&self.entries[index], opacity));
         }
 
-        let pixels = capture_pixels(renderer, framebuffer, output_size, rect)?;
-        let buffer = blur_patch_from_capture(&pixels, rect.size, target.material);
+        let program = self.program(renderer)?;
+        let texture_size = blur_texture_size(rect.size);
+        let (capture, blurred) = match cached {
+            Some(index) if self.entries[index].texture_size == texture_size => {
+                let entry = &mut self.entries[index];
+                capture_target(
+                    renderer,
+                    framebuffer,
+                    output_size,
+                    rect,
+                    texture_size,
+                    &mut entry.capture,
+                )?;
+                render_blur_texture(
+                    renderer,
+                    &program,
+                    target.material,
+                    texture_size,
+                    &entry.capture,
+                    &mut entry.blurred,
+                )?;
+                entry.location = target.location;
+                entry.target_opacity = target.opacity;
+                let opacity = entry.opacity(now, target.opacity);
+                return Ok((&self.entries[index], opacity));
+            }
+            _ => {
+                let mut capture = renderer.create_buffer(
+                    Fourcc::Abgr8888,
+                    Size::<i32, Buffer>::from((texture_size.w, texture_size.h)),
+                )?;
+                let mut blurred = renderer.create_buffer(
+                    Fourcc::Abgr8888,
+                    Size::<i32, Buffer>::from((texture_size.w, texture_size.h)),
+                )?;
+                capture_target(
+                    renderer,
+                    framebuffer,
+                    output_size,
+                    rect,
+                    texture_size,
+                    &mut capture,
+                )?;
+                render_blur_texture(
+                    renderer,
+                    &program,
+                    target.material,
+                    texture_size,
+                    &capture,
+                    &mut blurred,
+                )?;
+                (capture, blurred)
+            }
+        };
+
         match cached {
             Some(index) => {
-                self.entries[index].buffer = buffer;
-                self.entries[index].target_opacity = target.opacity;
+                self.entries[index] = SceneBlurCacheEntry {
+                    id: self.entries[index].id.clone(),
+                    surface: target.surface.clone(),
+                    blur_layer: target.blur_layer,
+                    rect,
+                    location: target.location,
+                    size: target.size,
+                    material: target.material,
+                    texture_size,
+                    capture,
+                    blurred,
+                    target_opacity: target.opacity,
+                };
             }
             None => self.entries.push(SceneBlurCacheEntry {
+                id: Id::new(),
                 surface: target.surface.clone(),
                 blur_layer: target.blur_layer,
+                rect,
                 location: target.location,
                 size: target.size,
                 material: target.material,
-                buffer,
+                texture_size,
+                capture,
+                blurred,
                 target_opacity: target.opacity,
             }),
         }
 
         let index = cached.unwrap_or(self.entries.len() - 1);
         let opacity = self.entries[index].opacity(now, target.opacity);
-        Ok((&self.entries[index].buffer, opacity))
-    }
-
-    fn has_target(&self, target: &LayerRenderTarget) -> bool {
-        self.entries.iter().any(|entry| entry.matches(target))
+        Ok((&self.entries[index], opacity))
     }
 
     fn cached_entry(&self, target: &LayerRenderTarget) -> Option<&SceneBlurCacheEntry> {
@@ -144,16 +295,17 @@ impl SceneBlurCache {
     }
 }
 
+pub type BlurElement = TextureRenderElement<GlesTexture>;
+
 pub fn capture_blur_elements(
     cache: &mut SceneBlurCache,
     renderer: &mut GlesRenderer,
     framebuffer: &GlesTarget<'_>,
     output_size: Size<i32, Physical>,
-    _blur_layer: BlurLayer,
     targets: &[LayerRenderTarget],
     damage: &[Rectangle<i32, Physical>],
     enabled: bool,
-) -> Result<Vec<MemoryRenderBufferRenderElement<GlesRenderer>>, GlesError> {
+) -> Result<Vec<BlurElement>, GlesError> {
     if !enabled {
         return Ok(Vec::new());
     }
@@ -163,9 +315,9 @@ pub fn capture_blur_elements(
         let Some(rect) = clipped_target_rect(output_size, target) else {
             continue;
         };
-        let (buffer, opacity) =
+        let (entry, opacity) =
             cache.buffer_for_target(renderer, framebuffer, output_size, target, rect, damage)?;
-        elements.push(render_element(renderer, rect, buffer, opacity)?);
+        elements.push(render_element(renderer, rect, entry, opacity));
     }
 
     Ok(elements)
@@ -173,12 +325,16 @@ pub fn capture_blur_elements(
 
 #[derive(Debug)]
 struct SceneBlurCacheEntry {
+    id: Id,
     surface: WlSurface,
     blur_layer: BlurLayer,
+    rect: Rectangle<i32, Physical>,
     location: Point<i32, Logical>,
     size: Size<i32, Logical>,
     material: LayerMaterial,
-    buffer: MemoryRenderBuffer,
+    texture_size: Size<i32, Physical>,
+    capture: GlesTexture,
+    blurred: GlesTexture,
     target_opacity: f32,
 }
 
@@ -193,6 +349,118 @@ impl SceneBlurCacheEntry {
 
     fn opacity(&self, _now: Instant, current_opacity: f32) -> f32 {
         current_opacity.clamp(0.0, 1.0)
+    }
+}
+
+fn capture_target(
+    renderer: &mut GlesRenderer,
+    framebuffer: &GlesTarget<'_>,
+    output_size: Size<i32, Physical>,
+    rect: Rectangle<i32, Physical>,
+    texture_size: Size<i32, Physical>,
+    capture: &mut GlesTexture,
+) -> Result<(), GlesError> {
+    let source = Rectangle::<i32, Physical>::new(
+        (rect.loc.x, output_size.h - rect.loc.y - rect.size.h).into(),
+        rect.size,
+    );
+    let target = Rectangle::<i32, Physical>::from_size(texture_size);
+    let mut target_framebuffer = renderer.bind(capture)?;
+    renderer.blit(
+        framebuffer,
+        &mut target_framebuffer,
+        source,
+        target,
+        TextureFilter::Linear,
+    )
+}
+
+fn render_blur_texture(
+    renderer: &mut GlesRenderer,
+    program: &GlesTexProgram,
+    material: LayerMaterial,
+    texture_size: Size<i32, Physical>,
+    capture: &GlesTexture,
+    blurred: &mut GlesTexture,
+) -> Result<(), GlesError> {
+    let mut target = renderer.bind(blurred)?;
+    let mut frame = renderer.render(&mut target, texture_size, Transform::Flipped180)?;
+    let full_damage = [Rectangle::<i32, Physical>::from_size(texture_size)];
+    frame.clear(
+        smithay::backend::renderer::Color32F::new(0.0, 0.0, 0.0, 0.0),
+        &full_damage,
+    )?;
+    frame.render_texture_from_to(
+        capture,
+        Rectangle::<f64, Buffer>::from_size(Size::<f64, Buffer>::from((
+            texture_size.w as f64,
+            texture_size.h as f64,
+        ))),
+        Rectangle::<i32, Physical>::from_size(texture_size),
+        &full_damage,
+        &[],
+        Transform::Normal,
+        1.0,
+        Some(program),
+        &blur_uniforms(texture_size, material),
+    )?;
+    let _ = frame.finish()?;
+    Ok(())
+}
+
+fn render_element(
+    renderer: &GlesRenderer,
+    rect: Rectangle<i32, Physical>,
+    entry: &SceneBlurCacheEntry,
+    opacity: f32,
+) -> BlurElement {
+    TextureRenderElement::from_static_texture(
+        entry.id.clone(),
+        renderer.context_id(),
+        Point::<f64, Physical>::from((rect.loc.x as f64, rect.loc.y as f64)),
+        entry.blurred.clone(),
+        1,
+        Transform::Normal,
+        Some(opacity.clamp(0.0, 1.0)),
+        Some(Rectangle::<f64, Logical>::from_size(
+            Size::<f64, Logical>::from((entry.texture_size.w as f64, entry.texture_size.h as f64)),
+        )),
+        Some(Size::<i32, Logical>::from((rect.size.w, rect.size.h))),
+        None,
+        Kind::Unspecified,
+    )
+}
+
+fn blur_uniforms(
+    texture_size: Size<i32, Physical>,
+    material: LayerMaterial,
+) -> [Uniform<'static>; 3] {
+    [
+        Uniform::new(
+            "texel",
+            UniformValue::_2f(
+                1.0 / texture_size.w.max(1) as f32,
+                1.0 / texture_size.h.max(1) as f32,
+            ),
+        ),
+        Uniform::new(
+            "target_size",
+            UniformValue::_2f(texture_size.w as f32, texture_size.h as f32),
+        ),
+        Uniform::new(
+            "radius",
+            UniformValue::_1f(material_radius(material, texture_size)),
+        ),
+    ]
+}
+
+fn material_radius(material: LayerMaterial, texture_size: Size<i32, Physical>) -> f32 {
+    match material {
+        LayerMaterial::Rect => 0.0,
+        LayerMaterial::RoundRect { radius } => {
+            let scale = blur_downscale(texture_size.w, texture_size.h) as f32;
+            radius as f32 / scale
+        }
     }
 }
 
@@ -217,72 +485,31 @@ fn clipped_rect(
         .intersection(output)
 }
 
-fn render_element(
-    renderer: &mut GlesRenderer,
-    rect: Rectangle<i32, Physical>,
-    buffer: &MemoryRenderBuffer,
-    opacity: f32,
-) -> Result<MemoryRenderBufferRenderElement<GlesRenderer>, GlesError> {
-    MemoryRenderBufferRenderElement::from_buffer(
-        renderer,
-        (rect.loc.x as f64, rect.loc.y as f64),
-        buffer,
-        Some(opacity.clamp(0.0, 1.0)),
-        None,
-        Some(Size::<i32, Logical>::from((rect.size.w, rect.size.h))),
-        Kind::Unspecified,
-    )
+fn blur_texture_size(size: Size<i32, Physical>) -> Size<i32, Physical> {
+    let scale = blur_downscale(size.w, size.h);
+    Size::<i32, Physical>::from((
+        div_ceil(size.w, scale).max(1),
+        div_ceil(size.h, scale).max(1),
+    ))
 }
 
-fn capture_pixels(
-    renderer: &mut GlesRenderer,
-    framebuffer: &GlesTarget<'_>,
-    output_size: Size<i32, Physical>,
-    rect: Rectangle<i32, Physical>,
-) -> Result<Vec<u8>, GlesError> {
-    let region = Rectangle::<i32, Buffer>::new(
-        (rect.loc.x, output_size.h - rect.loc.y - rect.size.h).into(),
-        (rect.size.w, rect.size.h).into(),
-    );
-    let mapping = renderer.copy_framebuffer(framebuffer, region, Fourcc::Abgr8888)?;
-    let flipped = mapping.flipped();
-    let bytes = renderer.map_texture(&mapping)?;
+fn blur_downscale(width: i32, height: i32) -> i32 {
+    let area = width.saturating_mul(height);
+    if area >= 420_000 {
+        12
+    } else if area >= 120_000 {
+        10
+    } else {
+        7
+    }
+}
 
-    Ok(top_left_pixels(bytes, rect.size, flipped))
+fn div_ceil(value: i32, divisor: i32) -> i32 {
+    (value + divisor - 1) / divisor
 }
 
 fn target_is_damaged(rect: Rectangle<i32, Physical>, damage: &[Rectangle<i32, Physical>]) -> bool {
     damage
         .iter()
         .any(|damage| damage.intersection(rect).is_some())
-}
-
-fn top_left_pixels(source: &[u8], size: Size<i32, Physical>, flipped: bool) -> Vec<u8> {
-    if !flipped {
-        return source.to_vec();
-    }
-
-    let stride = (size.w * 4) as usize;
-    let mut pixels = vec![0; source.len()];
-    for y in 0..size.h as usize {
-        let source_start = (size.h as usize - 1 - y) * stride;
-        let target_start = y * stride;
-        pixels[target_start..target_start + stride]
-            .copy_from_slice(&source[source_start..source_start + stride]);
-    }
-    pixels
-}
-
-fn blur_patch_from_capture(
-    pixels: &[u8],
-    size: Size<i32, Physical>,
-    material: LayerMaterial,
-) -> MemoryRenderBuffer {
-    blur_material::build_blur_patch_for_material(
-        pixels,
-        size,
-        Point::from((0, 0)),
-        Size::<i32, Logical>::from((size.w, size.h)),
-        material,
-    )
 }

@@ -187,7 +187,7 @@
       {#if saving}<span class="settings-save-state is-saving">Saving</span>{/if}
     </header>
 
-    <div class="settings-page">
+    <div class="settings-page" class:is-loaded={loaded}>
       {#if !loaded}
         <div class="settings-loading" role="status" aria-live="polite" aria-label="Loading settings">
           <span></span>

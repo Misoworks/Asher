@@ -46,22 +46,49 @@
   width: var(--dock-item-size);
   height: var(--dock-item-size);
   min-height: var(--dock-item-size);
+  color: var(--panel-text);
   z-index: 1;
 }
 
-.taskbar-launcher svg {
-  width: calc(var(--dock-icon-size) - 4px);
-  height: calc(var(--dock-icon-size) - 4px);
-  transition: transform 145ms var(--ease-shell);
+.taskbar-launcher .asher-mark {
+  width: calc(var(--dock-icon-size) - 8px);
+  height: calc(var(--dock-icon-size) - 7px);
+  overflow: visible;
 }
 
-.taskbar-launcher:hover svg {
-  transform: translateY(-10px);
-  will-change: transform;
+.asher-mark-primary,
+.asher-mark-secondary {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 150ms var(--ease-shell),
+    transform 180ms var(--ease-shell);
 }
 
-.taskbar-launcher:active svg {
-  transform: translateY(0);
+.asher-mark-primary {
+  transform: translate3d(-0.45px, -0.45px, 0) scale(0.94);
+}
+
+.asher-mark-secondary {
+  transform: translate3d(0.45px, 0.45px, 0) scale(0.94);
+}
+
+.taskbar-launcher:hover .asher-mark-primary {
+  transform: translate3d(-1px, -1px, 0) scale(0.96) rotate(-5deg);
+}
+
+.taskbar-launcher:hover .asher-mark-secondary {
+  transform: translate3d(1px, 1px, 0) scale(0.96) rotate(5deg);
+}
+
+.taskbar-launcher:active .asher-mark-primary {
+  opacity: 0.82;
+  transform: translate3d(-0.2px, -0.2px, 0) scale(0.92);
+}
+
+.taskbar-launcher:active .asher-mark-secondary {
+  opacity: 0.82;
+  transform: translate3d(0.2px, 0.2px, 0) scale(0.92);
 }
 
 .taskbar-apps {

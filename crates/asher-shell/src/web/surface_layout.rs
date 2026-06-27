@@ -99,10 +99,9 @@ fn shell_size(kind: WebShellSurface, size: (i32, i32), panel_taskbar: bool) -> (
 
 fn layer(kind: WebShellSurface) -> ShellSurfaceLayer {
     match kind {
-        WebShellSurface::StartMenu
-        | WebShellSurface::DockMenu
-        | WebShellSurface::NotificationToast
-        | WebShellSurface::Panel => ShellSurfaceLayer::Overlay,
+        WebShellSurface::DockMenu | WebShellSurface::NotificationToast | WebShellSurface::Panel => {
+            ShellSurfaceLayer::Overlay
+        }
         _ => ShellSurfaceLayer::Top,
     }
 }

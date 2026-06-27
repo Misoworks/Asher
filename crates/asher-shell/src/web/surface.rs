@@ -949,7 +949,7 @@ fn hidden_shell_margin(
             margin.bottom = -(size.1 + 8);
         }
         WebShellSurface::StartMenu if panel_taskbar => {
-            margin.bottom = -(size.1 + 10);
+            margin.bottom = -(size.1 + 58);
         }
         WebShellSurface::StartMenu => {
             margin.bottom = -(size.1 + 8);
@@ -989,9 +989,9 @@ fn lerp_i32(from: i32, to: i32, progress: f32) -> i32 {
 
 fn shell_blur_region(kind: WebShellSurface, _width: i32, _height: i32) -> WindowRegion {
     match kind {
-        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
-            WindowRegion::adaptive_rounded_rect(26)
-        }
+        WebShellSurface::QuickSettings
+        | WebShellSurface::DateCenter
+        | WebShellSurface::StartMenu => WindowRegion::adaptive_rounded_rect(26),
         _ => WindowRegion::adaptive_full(),
     }
 }

@@ -202,8 +202,12 @@
   overflow: hidden auto;
   overscroll-behavior: contain;
   padding: 24px 28px 34px;
-  background: var(--settings-content);
+  background: transparent;
   -webkit-overflow-scrolling: touch;
+}
+
+.settings-page.is-loaded {
+  background: var(--settings-content);
 }
 
 .settings-loading {

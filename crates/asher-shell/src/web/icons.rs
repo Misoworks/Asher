@@ -25,11 +25,29 @@ pub fn icon_data_uri(path: &Path) -> Option<String> {
 
 fn icon_data_uri_uncached(path: &Path) -> Option<String> {
     let bytes = fs::read(path).ok()?;
-    let mime = icon_mime(path)?;
+    let mime = icon_mime(path, &bytes)?;
     Some(format!("data:{mime};base64,{}", base64_encode(&bytes)))
 }
 
-fn icon_mime(path: &Path) -> Option<&'static str> {
+fn icon_mime(path: &Path, bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return Some("image/webp");
+    }
+    if bytes
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+        == Some(b'<')
+    {
+        return Some("image/svg+xml");
+    }
+
     match path
         .extension()
         .and_then(|extension| extension.to_str())
