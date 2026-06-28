@@ -229,6 +229,9 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         display
             .flush_clients()
             .map_err(|error| DrmError::Unsupported(format!("Wayland flush failed: {error}")))?;
+        if active {
+            device.sync_cursor(&mut state);
+        }
 
         if active && !device.direct_scanout_pending() {
             let frame_result = {

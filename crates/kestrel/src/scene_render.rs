@@ -25,6 +25,7 @@ type WindowElement = RoundedWindowElement<WindowSurfaceElement>;
 pub struct SceneRenderRequest<'a> {
     pub state: &'a KestrelState,
     pub output_size: Size<i32, Physical>,
+    pub target_transform: Transform,
     pub damage: &'a [Rectangle<i32, Physical>],
     pub blur_damage: &'a [Rectangle<i32, Physical>],
     pub blur_enabled: bool,
@@ -89,7 +90,7 @@ fn render_flat_scene(
     framebuffer: &mut GlesTarget<'_>,
     request: SceneRenderRequest<'_>,
 ) -> Result<(), GlesError> {
-    let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+    let mut frame = renderer.render(framebuffer, request.output_size, request.target_transform)?;
     frame.clear(Color32F::new(0.08, 0.085, 0.09, 1.0), request.damage)?;
     draw_optional_memory(&mut frame, request.background.as_ref(), request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.background_layer, request.damage)?;
@@ -122,7 +123,7 @@ fn render_flat_scene_with_cached_layer_blur(
         BlurLayer::Overlay,
         request.overlay_targets,
     )?;
-    let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+    let mut frame = renderer.render(framebuffer, request.output_size, request.target_transform)?;
     frame.clear(Color32F::new(0.08, 0.085, 0.09, 1.0), request.damage)?;
     draw_optional_memory(&mut frame, request.background.as_ref(), request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.background_layer, request.damage)?;
@@ -146,7 +147,8 @@ fn render_staged_scene(
     request: SceneRenderRequest<'_>,
 ) -> Result<(), GlesError> {
     {
-        let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+        let mut frame =
+            renderer.render(framebuffer, request.output_size, request.target_transform)?;
         frame.clear(Color32F::new(0.08, 0.085, 0.09, 1.0), request.damage)?;
         draw_optional_memory(&mut frame, request.background.as_ref(), request.damage)?;
         draw_render_elements(&mut frame, 1.0, request.background_layer, request.damage)?;
@@ -176,6 +178,7 @@ fn render_staged_scene(
             renderer,
             framebuffer,
             request.output_size,
+            request.target_transform,
             request.damage,
             &mut batched_windows,
             &mut batched_chrome,
@@ -185,11 +188,13 @@ fn render_staged_scene(
             renderer,
             framebuffer,
             request.output_size,
+            request.target_transform,
             &targets,
             request.blur_damage,
             request.blur_enabled,
         )?;
-        let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+        let mut frame =
+            renderer.render(framebuffer, request.output_size, request.target_transform)?;
         let blur_damage = blur_target_damage(request.output_size, &targets);
         draw_blur_elements(&mut frame, &blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, &window, request.damage)?;
@@ -200,6 +205,7 @@ fn render_staged_scene(
         renderer,
         framebuffer,
         request.output_size,
+        request.target_transform,
         request.damage,
         &mut batched_windows,
         &mut batched_chrome,
@@ -210,12 +216,14 @@ fn render_staged_scene(
         renderer,
         framebuffer,
         request.output_size,
+        request.target_transform,
         request.top_targets,
         request.blur_damage,
         request.blur_enabled,
     )?;
     {
-        let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+        let mut frame =
+            renderer.render(framebuffer, request.output_size, request.target_transform)?;
         let blur_damage = blur_target_damage(request.output_size, request.top_targets);
         draw_blur_elements(&mut frame, &top_blur, &blur_damage)?;
         draw_render_elements(&mut frame, 1.0, request.top_layer, request.damage)?;
@@ -227,11 +235,12 @@ fn render_staged_scene(
         renderer,
         framebuffer,
         request.output_size,
+        request.target_transform,
         request.overlay_targets,
         request.blur_damage,
         request.blur_enabled,
     )?;
-    let mut frame = renderer.render(framebuffer, request.output_size, Transform::Flipped180)?;
+    let mut frame = renderer.render(framebuffer, request.output_size, request.target_transform)?;
     let blur_damage = blur_target_damage(request.output_size, request.overlay_targets);
     draw_blur_elements(&mut frame, &overlay_blur, &blur_damage)?;
     draw_render_elements(&mut frame, 1.0, request.overlay_layer, request.damage)?;
@@ -246,6 +255,7 @@ fn flush_window_batch(
     renderer: &mut GlesRenderer,
     framebuffer: &mut GlesTarget<'_>,
     output_size: Size<i32, Physical>,
+    target_transform: Transform,
     damage: &[Rectangle<i32, Physical>],
     windows: &mut Vec<WindowElement>,
     chrome: &mut Vec<MemoryElement>,
@@ -256,7 +266,7 @@ fn flush_window_batch(
 
     windows.reverse();
     chrome.reverse();
-    let mut frame = renderer.render(framebuffer, output_size, Transform::Flipped180)?;
+    let mut frame = renderer.render(framebuffer, output_size, target_transform)?;
     draw_render_elements(&mut frame, 1.0, windows.as_slice(), damage)?;
     draw_render_elements(&mut frame, 1.0, chrome.as_slice(), damage)?;
     let _ = frame.finish()?;

@@ -16,8 +16,9 @@ use smithay::{
         gles::{GlesError, GlesRenderer},
         utils::on_commit_buffer_handler,
     },
+    desktop::PopupManager,
     reexports::wayland_server::protocol::wl_surface,
-    utils::{Logical, Size},
+    utils::{Logical, Physical, Point, Rectangle, Size},
     wayland::shell::wlr_layer::Layer,
 };
 
@@ -143,6 +144,8 @@ fn append_layer_elements(
     elements: &mut Vec<LayerElement>,
 ) {
     for target in layers::render_surfaces(state.output(), layer) {
+        let location = Point::<i32, Physical>::from((target.location.x, target.location.y));
+        let clip = Rectangle::<i32, Physical>::new(location, (target.size.w, target.size.h).into());
         elements.extend(
             render_elements_from_surface_tree(
                 renderer,
@@ -154,10 +157,6 @@ fn append_layer_elements(
             )
             .into_iter()
             .map(|element| {
-                let clip = smithay::utils::Rectangle::<i32, smithay::utils::Physical>::new(
-                    (target.location.x, target.location.y).into(),
-                    (target.size.w, target.size.h).into(),
-                );
                 RoundedWindowElement::new(
                     element,
                     clip,
@@ -165,6 +164,31 @@ fn append_layer_elements(
                 )
             }),
         );
+
+        for (popup, popup_offset) in PopupManager::popups_for_surface(&target.surface) {
+            let offset = popup_offset - popup.geometry().loc;
+            let popup_location = Point::<i32, Physical>::from((
+                target.location.x + offset.x,
+                target.location.y + offset.y,
+            ));
+            let popup_size = popup.geometry().size;
+            let popup_clip = Rectangle::<i32, Physical>::new(
+                popup_location,
+                (popup_size.w, popup_size.h).into(),
+            );
+            elements.extend(
+                render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    (popup_location.x, popup_location.y),
+                    1.0,
+                    1.0,
+                    Kind::Unspecified,
+                )
+                .into_iter()
+                .map(|element| RoundedWindowElement::new(element, popup_clip, 0)),
+            );
+        }
     }
 }
 

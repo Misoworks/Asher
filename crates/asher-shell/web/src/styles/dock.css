@@ -72,7 +72,7 @@
 
 #app.is-surface-opening[data-surface="dock-menu"] .dock-menu {
   animation: dock-menu-shell-in 170ms var(--ease-shell) both;
-  will-change: opacity, transform;
+  will-change: transform;
 }
 
 #app.is-surface-closing[data-surface="dock-menu"] .dock-menu {
@@ -137,22 +137,20 @@
 
 @keyframes dock-menu-content-in {
   from {
-    opacity: 0;
     transform: translateY(4px);
   }
 
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
 
 @keyframes dock-menu-shell-in {
   from {
-    opacity: 0;
+    transform: translate3d(0, 14px, 0);
   }
 
   to {
-    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }

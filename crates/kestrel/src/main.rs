@@ -24,6 +24,7 @@ mod session_services;
 mod shell;
 mod state;
 mod state_focus;
+mod submitted_damage;
 mod titlebar;
 mod window;
 mod window_animation;

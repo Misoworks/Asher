@@ -1,0 +1,13 @@
+<svg id="vector" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <filter id="fe-shadow" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1" />
+    </filter>
+  </defs>
+  <g filter="url(#fe-shadow)" opacity="0.4" transform="translate(0, 1)">
+    <path fill="#000" d="M19.25 10.25h-5.5v-5.5a1.75 1.75 0 0 0-3.5 0v5.5h-5.5a1.75 1.75 0 0 0 0 3.5h5.5v5.5a1.75 1.75 0 0 0 3.5 0v-5.5h5.5a1.75 1.75 0 0 0 0-3.5m0 2.5h-6.5v6.5a.75.75 0 0 1-1.5 0v-6.5h-6.5a.75.75 0 0 1 0-1.5h6.5v-6.5a.75.75 0 0 1 1.5 0v6.5h6.5a.75.75 0 0 1 0 1.5"/>
+    <path fill="#000" d="M19.25 11.25h-6.5v-6.5a.75.75 0 0 0-1.5 0v6.5h-6.5a.75.75 0 0 0 0 1.5h6.5v6.5a.75.75 0 0 0 1.5 0v-6.5h6.5a.75.75 0 0 0 0-1.5" fill-rule="evenodd"/>
+  </g>
+  <path fill="#fff" d="M19.25 10.25h-5.5v-5.5a1.75 1.75 0 0 0-3.5 0v5.5h-5.5a1.75 1.75 0 0 0 0 3.5h5.5v5.5a1.75 1.75 0 0 0 3.5 0v-5.5h5.5a1.75 1.75 0 0 0 0-3.5m0 2.5h-6.5v6.5a.75.75 0 0 1-1.5 0v-6.5h-6.5a.75.75 0 0 1 0-1.5h6.5v-6.5a.75.75 0 0 1 1.5 0v6.5h6.5a.75.75 0 0 1 0 1.5" id="path_0"/>
+    <path fill="#000" d="M19.25 11.25h-6.5v-6.5a.75.75 0 0 0-1.5 0v6.5h-6.5a.75.75 0 0 0 0 1.5h6.5v6.5a.75.75 0 0 0 1.5 0v-6.5h6.5a.75.75 0 0 0 0-1.5" fill-rule="evenodd" id="path_1"/>
+</svg>

@@ -1,4 +1,5 @@
 use super::DockApp;
+use crate::apps::normalize_launch_command;
 use asher_config::{AsherConfig, PinnedAppConfig};
 
 pub fn pin_app(
@@ -8,7 +9,7 @@ pub fn pin_app(
     command: String,
     icon: Option<String>,
 ) -> bool {
-    let command = command.trim().to_string();
+    let command = normalize_launch_command(&command);
     if command.is_empty() {
         return false;
     }
@@ -107,5 +108,5 @@ fn clean_icon(icon: Option<String>) -> Option<String> {
 }
 
 fn commands_equal(left: &str, right: &str) -> bool {
-    left.trim() == right.trim()
+    normalize_launch_command(left) == normalize_launch_command(right)
 }

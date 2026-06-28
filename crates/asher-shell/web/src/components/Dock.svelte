@@ -11,15 +11,16 @@
   let orderSignature = $state("");
   let draggedCommand = $state<string | null>(null);
 
-  const appByCommand = $derived(new Map(snapshot.dockApps.map((app) => [app.command, app])));
+  const pinnedApps = $derived(snapshot.dockApps.filter((app) => app.pinned));
+  const appByCommand = $derived(new Map(pinnedApps.map((app) => [app.command, app])));
   const orderedApps = $derived(
-    (order.length > 0 ? order : snapshot.dockApps.map((app) => app.command))
+    (order.length > 0 ? order : pinnedApps.map((app) => app.command))
       .map((command) => appByCommand.get(command))
       .filter((app): app is DockApp => Boolean(app)),
   );
 
   $effect(() => {
-    const commands = snapshot.dockApps.map((app) => app.command);
+    const commands = pinnedApps.map((app) => app.command);
     const signature = commands.join("\0");
     if (!draggedCommand && signature !== orderSignature) {
       order = commands;
@@ -44,7 +45,7 @@
 
   function startReorder(command: string) {
     draggedCommand = command;
-    order = snapshot.dockApps.map((app) => app.command);
+    order = pinnedApps.map((app) => app.command);
     sendAction({ type: "dock-menu-close" });
   }
 
@@ -55,7 +56,7 @@
 
   function commitReorder() {
     if (!draggedCommand) return;
-    const current = snapshot.dockApps.map((app) => app.command);
+    const current = pinnedApps.map((app) => app.command);
     if (!sameOrder(order, current)) {
       sendAction({ type: "dock-reorder", commands: order });
     }
@@ -65,7 +66,7 @@
   function endReorder() {
     if (!draggedCommand) return;
     draggedCommand = null;
-    order = snapshot.dockApps.map((app) => app.command);
+    order = pinnedApps.map((app) => app.command);
   }
 </script>
 

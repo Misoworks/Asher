@@ -7,9 +7,11 @@ mod xdg;
 pub use desktop_entry::{AppEntry, discover_applications};
 pub(crate) use icon_theme::resolve_icon_path;
 
-use asher_config::AsherConfig;
+use asher_config::{AsherConfig, ConfigPaths};
 use std::{
-    env, io,
+    env,
+    fs::OpenOptions,
+    io,
     path::PathBuf,
     process::{Child, Command, Stdio},
 };
@@ -28,7 +30,11 @@ pub fn dock_apps(config: &AsherConfig) -> Vec<DockApp> {
                 let icon_path = matched
                     .and_then(|entry| entry.icon_path.clone())
                     .or_else(|| resolve_icon_path(app.icon.as_deref()));
-                DockApp::new(app.label.clone(), app.command.clone(), icon_path)
+                DockApp::new(
+                    app.label.clone(),
+                    normalize_launch_command(&app.command),
+                    icon_path,
+                )
             })
             .collect();
     }
@@ -107,7 +113,7 @@ pub fn launcher_apps(config: &AsherConfig, fallback: &[DockApp]) -> Vec<AppEntry
         .iter()
         .map(|app| AppEntry {
             name: app.label.clone(),
-            command: app.command.clone(),
+            command: normalize_launch_command(&app.command),
             comment: None,
             icon: None,
             icon_path: None,
@@ -116,13 +122,116 @@ pub fn launcher_apps(config: &AsherConfig, fallback: &[DockApp]) -> Vec<AppEntry
 }
 
 pub fn spawn_command(command: &str, xwayland_display: Option<&str>) -> io::Result<Child> {
-    let mut child = command_for_launch(command);
+    let command = normalize_launch_command(command);
+    log_app_launch(&command);
+    let mut child = command_for_launch(&command);
     apply_app_environment(&mut child, xwayland_display);
     child.spawn()
 }
 
+pub(crate) fn normalize_launch_command(command: &str) -> String {
+    clean_exec_forwarding_tokens(&clean_exec_placeholders(
+        &percent_decode(command).unwrap_or_else(|| command.to_string()),
+    ))
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    if !value.as_bytes().contains(&b'%') {
+        return None;
+    }
+
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut decoded_any = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+        {
+            output.push((high << 4) | low);
+            decoded_any = true;
+            index += 3;
+            continue;
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+
+    decoded_any.then(|| String::from_utf8_lossy(&output).into_owned())
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn clean_exec_placeholders(command: &str) -> String {
+    let mut cleaned = String::new();
+    let mut chars = command.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            cleaned.push(ch);
+            continue;
+        }
+
+        match chars.next() {
+            Some('%') => cleaned.push('%'),
+            Some('f' | 'F' | 'u' | 'U' | 'd' | 'D' | 'n' | 'N' | 'i' | 'c' | 'k' | 'm' | 'v') => {}
+            Some(other) => {
+                cleaned.push('%');
+                cleaned.push(other);
+            }
+            None => cleaned.push('%'),
+        }
+    }
+
+    cleaned.trim().to_string()
+}
+
+fn clean_exec_forwarding_tokens(command: &str) -> String {
+    if !command.contains("@@") {
+        return command.trim().to_string();
+    }
+
+    if let Some(words) = shell_words(command) {
+        return words
+            .into_iter()
+            .filter(|word| !is_forwarding_token(word))
+            .map(|word| shell_quote_word(&word))
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+
+    command
+        .split_whitespace()
+        .filter(|word| !is_forwarding_token(word))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_forwarding_token(word: &str) -> bool {
+    matches!(word, "@@" | "@@u" | "@@U" | "@@f" | "@@F")
+}
+
+fn shell_quote_word(word: &str) -> String {
+    if word.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b'=')
+    }) {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', "'\\''"))
+}
+
 fn command_for_launch(command: &str) -> Command {
-    if let Some(argv) = shell_words(command) {
+    if let Some(mut argv) = shell_words(command) {
+        prepare_graphical_argv(&mut argv);
         let mut child = Command::new(&argv[0]);
         child.args(&argv[1..]);
         silence_stdio(&mut child);
@@ -136,10 +245,14 @@ fn command_for_launch(command: &str) -> Command {
 }
 
 fn silence_stdio(command: &mut Command) {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    command.stdin(Stdio::null());
+    if let Some(log) = app_launch_log() {
+        let stdout = log.try_clone().ok().map(Stdio::from);
+        command.stdout(stdout.unwrap_or_else(Stdio::null));
+        command.stderr(Stdio::from(log));
+    } else {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
 }
 
 fn shell_words(command: &str) -> Option<Vec<String>> {
@@ -176,6 +289,65 @@ fn shell_words(command: &str) -> Option<Vec<String>> {
     (!words.is_empty()).then_some(words)
 }
 
+fn prepare_graphical_argv(argv: &mut Vec<String>) {
+    if !is_chromium_family_launch(argv) {
+        return;
+    }
+
+    push_unique_switch(argv, "--ozone-platform=wayland");
+    push_unique_switch(argv, "--enable-features=UseOzonePlatform");
+    push_unique_switch(argv, "--disable-vulkan");
+    push_unique_switch(
+        argv,
+        "--disable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+    );
+}
+
+fn push_unique_switch(argv: &mut Vec<String>, switch: &str) {
+    let name = switch.split_once('=').map_or(switch, |(name, _)| name);
+    if argv
+        .iter()
+        .any(|arg| arg == name || arg.starts_with(&format!("{name}=")))
+    {
+        return;
+    }
+    argv.push(switch.to_string());
+}
+
+fn is_chromium_family_launch(argv: &[String]) -> bool {
+    let Some(program) = launched_program(argv) else {
+        return false;
+    };
+    let name = program.rsplit('/').next().unwrap_or(program).to_lowercase();
+    name.contains("chrome")
+        || name.contains("chromium")
+        || name.contains("brave")
+        || name.contains("edge")
+        || name.contains("electron")
+        || name.contains("codex")
+        || name.contains("cursor")
+        || name.contains("curseforge")
+}
+
+fn launched_program(argv: &[String]) -> Option<&str> {
+    let mut index = 0;
+    if argv.first().is_some_and(|arg| arg == "env") {
+        index = 1;
+        while let Some(arg) = argv.get(index) {
+            if arg.starts_with('-') {
+                index += 1;
+                continue;
+            }
+            if arg.contains('=') {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+    }
+    argv.get(index).map(String::as_str)
+}
+
 fn apply_app_environment(command: &mut Command, xwayland_display: Option<&str>) {
     command.env_remove("DISPLAY");
     command.env("XDG_CURRENT_DESKTOP", "Asher");
@@ -193,6 +365,7 @@ fn apply_app_environment(command: &mut Command, xwayland_display: Option<&str>) 
     command.env("CLUTTER_BACKEND", "wayland");
     command.env("MOZ_ENABLE_WAYLAND", "1");
     command.env("ELECTRON_OZONE_PLATFORM_HINT", "wayland");
+    command.env("NIXOS_OZONE_WL", "1");
     command.env_remove("WAYLAND_DISPLAY");
     if let Some(display) = asher_wayland_display() {
         command.env("WAYLAND_DISPLAY", display);
@@ -200,6 +373,22 @@ fn apply_app_environment(command: &mut Command, xwayland_display: Option<&str>) 
     if let Some(display) = xwayland_display {
         command.env("DISPLAY", display);
         command.env("_JAVA_AWT_WM_NONREPARENTING", "1");
+    }
+}
+
+fn app_launch_log() -> Option<std::fs::File> {
+    let path = ConfigPaths::discover().ok()?.log_file("asher-apps");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    OpenOptions::new().create(true).append(true).open(path).ok()
+}
+
+fn log_app_launch(command: &str) {
+    use std::io::Write;
+
+    if let Some(mut log) = app_launch_log() {
+        let _ = writeln!(log, "\n--- asher launch: {command}");
     }
 }
 
@@ -219,7 +408,7 @@ fn default_dock_app(
         .map(|app| app.name.clone())
         .unwrap_or_else(|| label.to_string());
 
-    DockApp::new(label, command.to_string(), icon_path)
+    DockApp::new(label, normalize_launch_command(command), icon_path)
 }
 
 fn resolve_first_icon_path(icons: &[&str]) -> Option<PathBuf> {
@@ -230,7 +419,9 @@ fn resolve_first_icon_path(icons: &[&str]) -> Option<PathBuf> {
 }
 
 fn commands_match(left: &str, right: &str) -> bool {
-    xdg::command_name(left).is_some_and(|left| xdg::command_name(right) == Some(left))
+    let left = normalize_launch_command(left);
+    let right = normalize_launch_command(right);
+    xdg::command_name(&left).is_some_and(|left| xdg::command_name(&right) == Some(left))
 }
 
 fn asher_wayland_display() -> Option<std::ffi::OsString> {
@@ -242,4 +433,40 @@ fn asher_wayland_display() -> Option<std::ffi::OsString> {
         .is_ok_and(|desktop| desktop.split(':').any(|entry| entry == "Asher"))
         .then(|| env::var_os("WAYLAND_DISPLAY"))
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_launch_command, prepare_graphical_argv};
+
+    #[test]
+    fn launch_command_decodes_percent_encoded_paths() {
+        assert_eq!(
+            normalize_launch_command(
+                "env DESKTOPINTEGRATION=1 %2Fhome%2Fkristof%2FAppImages%2Fcodex_desktop.appimage",
+            ),
+            "env DESKTOPINTEGRATION=1 /home/kristof/AppImages/codex_desktop.appimage",
+        );
+    }
+
+    #[test]
+    fn launch_command_leaves_desktop_exec_placeholders_to_clean_exec() {
+        assert_eq!(normalize_launch_command("ghostty %u"), "ghostty");
+    }
+
+    #[test]
+    fn launch_command_removes_flatpak_file_forwarding_tokens() {
+        assert_eq!(
+            normalize_launch_command("/usr/bin/flatpak run app.id @@u @@"),
+            "/usr/bin/flatpak run app.id",
+        );
+    }
+
+    #[test]
+    fn launch_command_adds_gpu_safe_chromium_wayland_flags() {
+        let mut argv = vec!["google-chrome-stable".to_string()];
+        prepare_graphical_argv(&mut argv);
+        assert!(argv.iter().any(|arg| arg == "--ozone-platform=wayland"));
+        assert!(argv.iter().any(|arg| arg == "--disable-vulkan"));
+    }
 }

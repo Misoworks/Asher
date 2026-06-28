@@ -1,7 +1,7 @@
 use super::{appearance::WebAppearance, icons::icon_data_uri, palette::WebPalette};
 use crate::{
-    apps::AppEntry,
-    dock::{DockApp, DockAppState},
+    apps::{AppEntry, normalize_launch_command},
+    dock::{DockApp, DockAppState, dock_app_matches_window},
     ipc::ShellModel,
     services::{
         notifications::{NotificationItem, NotificationSnapshot, NotificationUrgency},
@@ -11,6 +11,7 @@ use crate::{
     theme::ShellPalette,
 };
 use asher_config::AsherConfig;
+use asher_ipc::WindowSummary;
 use serde::Serialize;
 use std::{env, path::PathBuf};
 use time::{OffsetDateTime, macros::format_description};
@@ -92,6 +93,35 @@ pub struct WebWindow {
     pub visible: bool,
 }
 
+impl From<&WindowSummary> for WebWindow {
+    fn from(window: &WindowSummary) -> Self {
+        Self {
+            id: window.id.0,
+            title: window
+                .title
+                .clone()
+                .or_else(|| window.app_id.clone())
+                .unwrap_or_else(|| "Window".to_string()),
+            app_id: window.app_id.clone(),
+            icon_uri: window
+                .app_id
+                .as_deref()
+                .and_then(|app_id| crate::apps::resolve_icon_path(Some(app_id)))
+                .as_deref()
+                .and_then(icon_data_uri),
+            workspace: window.workspace.0.clone(),
+            geometry: WebGeometry {
+                x: window.geometry.x,
+                y: window.geometry.y,
+                width: window.geometry.width,
+                height: window.geometry.height,
+            },
+            active: window.is_active,
+            visible: window.is_visible,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebDockApp {
@@ -100,6 +130,8 @@ pub struct WebDockApp {
     pub icon_uri: Option<String>,
     pub running: bool,
     pub active: bool,
+    pub pinned: bool,
+    pub window_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -219,6 +251,52 @@ impl WebShellSnapshot {
         safe_mode: bool,
     ) -> Self {
         let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let windows: Vec<WebWindow> = model.windows.iter().map(WebWindow::from).collect();
+        let mut web_dock_apps: Vec<WebDockApp> = dock_apps
+            .iter()
+            .map(|app| {
+                let state = DockAppState::for_app(app, model);
+                WebDockApp {
+                    label: app.label.clone(),
+                    command: app.command.clone(),
+                    icon_uri: app.icon_path.as_deref().and_then(icon_data_uri),
+                    running: state.running,
+                    active: state.active,
+                    pinned: true,
+                    window_id: None,
+                }
+            })
+            .collect();
+
+        for window in &model.windows {
+            if dock_apps
+                .iter()
+                .any(|app| dock_app_matches_window(app, window))
+            {
+                continue;
+            }
+            let label = window
+                .title
+                .clone()
+                .or_else(|| window.app_id.clone())
+                .unwrap_or_else(|| "Window".to_string());
+            let icon_uri = window
+                .app_id
+                .as_deref()
+                .and_then(|app_id| crate::apps::resolve_icon_path(Some(app_id)))
+                .as_deref()
+                .and_then(icon_data_uri);
+            web_dock_apps.push(WebDockApp {
+                label,
+                command: format!("window:{}", window.id.0),
+                icon_uri,
+                running: true,
+                active: window.is_active,
+                pinned: false,
+                window_id: Some(window.id.0),
+            });
+        }
+
         Self {
             surface: None,
             time: now
@@ -262,47 +340,8 @@ impl WebShellSnapshot {
                     active: workspace.id == model.active_workspace,
                 })
                 .collect(),
-            windows: model
-                .windows
-                .iter()
-                .map(|window| WebWindow {
-                    id: window.id.0,
-                    title: window
-                        .title
-                        .clone()
-                        .or_else(|| window.app_id.clone())
-                        .unwrap_or_else(|| "Window".to_string()),
-                    app_id: window.app_id.clone(),
-                    icon_uri: window
-                        .app_id
-                        .as_deref()
-                        .and_then(|app_id| crate::apps::resolve_icon_path(Some(app_id)))
-                        .as_deref()
-                        .and_then(icon_data_uri),
-                    workspace: window.workspace.0.clone(),
-                    geometry: WebGeometry {
-                        x: window.geometry.x,
-                        y: window.geometry.y,
-                        width: window.geometry.width,
-                        height: window.geometry.height,
-                    },
-                    active: window.is_active,
-                    visible: window.is_visible,
-                })
-                .collect(),
-            dock_apps: dock_apps
-                .iter()
-                .map(|app| {
-                    let state = DockAppState::for_app(app, model);
-                    WebDockApp {
-                        label: app.label.clone(),
-                        command: app.command.clone(),
-                        icon_uri: app.icon_path.as_deref().and_then(icon_data_uri),
-                        running: state.running,
-                        active: state.active,
-                    }
-                })
-                .collect(),
+            windows,
+            dock_apps: web_dock_apps,
             dock_menu_command: dock_menu_command.map(str::to_string),
             dock_menu_x,
             applications: applications
@@ -465,7 +504,7 @@ fn mode_name(mode: asher_layout::ModeId) -> String {
 }
 
 fn commands_equal(left: &str, right: &str) -> bool {
-    left.trim() == right.trim()
+    normalize_launch_command(left) == normalize_launch_command(right)
 }
 
 fn notification_icon_uri(item: &NotificationItem) -> Option<String> {

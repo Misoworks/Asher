@@ -1,5 +1,5 @@
 use crate::{
-    apps::{AppEntry, spawn_command},
+    apps::{AppEntry, normalize_launch_command, spawn_command},
     chrome::ShellChrome,
     control::ShellControlServer,
     dock::{self, DockApp, dock_app_matches_window},
@@ -446,6 +446,7 @@ impl WebShell {
     }
 
     fn activate_dock_command(&mut self, command: String) {
+        let command = normalize_launch_command(&command);
         self.close_dock_menu();
         let Some(app) = self
             .dock_apps
@@ -486,26 +487,41 @@ impl WebShell {
 
     fn pin_dock_app(&mut self, label: String, command: String, icon: Option<String>) {
         let mut config = self.config.clone();
-        if dock::pin_app(&mut config, &self.dock_apps, label, command, icon) {
+        if dock::pin_app(
+            &mut config,
+            &self.dock_apps,
+            label,
+            normalize_launch_command(&command),
+            icon,
+        ) {
             self.save_shell_config(config);
         }
     }
 
     fn unpin_dock_app(&mut self, command: &str) {
         let mut config = self.config.clone();
-        if dock::unpin_app(&mut config, &self.dock_apps, command) {
+        if dock::unpin_app(
+            &mut config,
+            &self.dock_apps,
+            &normalize_launch_command(command),
+        ) {
             self.save_shell_config(config);
         }
     }
 
     fn reorder_dock_apps(&mut self, commands: Vec<String>) {
         let mut config = self.config.clone();
+        let commands = commands
+            .into_iter()
+            .map(|command| normalize_launch_command(&command))
+            .collect();
         if dock::reorder_apps(&mut config, &self.dock_apps, commands) {
             self.save_shell_config(config);
         }
     }
 
     fn launch(&mut self, command: String) {
+        let command = normalize_launch_command(&command);
         match spawn_command(&command, self.model.xwayland_display.as_deref()) {
             Ok(child) => {
                 debug!(pid = child.id(), command, "launched dock app");
@@ -517,6 +533,7 @@ impl WebShell {
     }
 
     fn force_quit_dock_app(&mut self, command: String) {
+        let command = normalize_launch_command(&command);
         self.close_dock_menu();
         let Some(pattern) = command
             .split_whitespace()
@@ -535,6 +552,7 @@ impl WebShell {
     }
 
     fn open_dock_menu(&mut self, command: String, x: Option<i32>) {
+        let command = normalize_launch_command(&command);
         if self.dock_menu_open
             && self.dock_menu_command.as_deref() == Some(command.as_str())
             && self.dock_menu_x == x

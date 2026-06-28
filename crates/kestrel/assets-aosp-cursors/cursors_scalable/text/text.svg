@@ -1,0 +1,13 @@
+<svg id="vector" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <filter id="fe-shadow" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1" />
+    </filter>
+  </defs>
+  <g filter="url(#fe-shadow)" opacity="0.4" transform="translate(0, 1)">
+    <path fill="#000" d="M12 3c-.551 0-1 .448-1 1v14a1.001 1.001 0 0 0 2 0V4c0-.552-.449-1-1-1"/>
+    <path fill="#000" d="M12 2c-1.103 0-2 .897-2 2v14c0 1.103.897 2 2 2s2-.897 2-2V4c0-1.103-.897-2-2-2m1 16a1.001 1.001 0 0 1-2 0V4a1.001 1.001 0 0 1 2 0z"/>
+  </g>
+  <path fill="#000" d="M12 3c-.551 0-1 .448-1 1v14a1.001 1.001 0 0 0 2 0V4c0-.552-.449-1-1-1" id="path_0"/>
+    <path fill="#fff" d="M12 2c-1.103 0-2 .897-2 2v14c0 1.103.897 2 2 2s2-.897 2-2V4c0-1.103-.897-2-2-2m1 16a1.001 1.001 0 0 1-2 0V4a1.001 1.001 0 0 1 2 0z" id="path_1"/>
+</svg>

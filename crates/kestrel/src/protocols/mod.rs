@@ -11,6 +11,7 @@ use smithay::{
     delegate_presentation, delegate_primary_selection, delegate_seat, delegate_shm,
     delegate_text_input_manager, delegate_viewporter, delegate_xdg_activation,
     delegate_xdg_decoration, delegate_xdg_shell, delegate_xdg_toplevel_icon,
+    desktop::PopupKind,
     input::{
         Seat, SeatHandler,
         pointer::{CursorIcon, CursorImageStatus},
@@ -100,7 +101,11 @@ impl XdgShellHandler for KestrelState {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+        let _ = self
+            .popup_manager
+            .track_popup(PopupKind::from(surface.clone()));
         let _ = surface.send_configure();
+        self.mark_scene_dirty();
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
@@ -380,6 +385,14 @@ impl WlrLayerShellHandler for KestrelState {
         debug!(?layer, namespace, "mapped layer surface");
     }
 
+    fn new_popup(&mut self, _parent: LayerSurface, popup: PopupSurface) {
+        let _ = self
+            .popup_manager
+            .track_popup(PopupKind::from(popup.clone()));
+        let _ = popup.send_configure();
+        self.mark_scene_dirty();
+    }
+
     fn layer_destroyed(&mut self, surface: LayerSurface) {
         self.unmap_layer_surface(&surface);
         self.mark_scene_dirty();
@@ -430,8 +443,10 @@ impl CompositorHandler for KestrelState {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        let needs_render = self.commit_surface_needs_render(surface);
+        let popup_needs_render = self.popup_manager.find_popup(surface).is_some();
+        let needs_render = self.commit_surface_needs_render(surface) || popup_needs_render;
         handle_commit(surface);
+        self.popup_manager.commit(surface);
         let decoration_changed = self.reconcile_decoration_after_commit(surface);
         if needs_render {
             self.mark_scene_dirty();

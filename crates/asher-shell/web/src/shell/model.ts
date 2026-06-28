@@ -90,6 +90,8 @@ export type DockApp = {
   iconUri?: string;
   running: boolean;
   active: boolean;
+  pinned: boolean;
+  windowId?: number;
 };
 
 export type ApplicationItem = {

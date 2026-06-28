@@ -14,6 +14,7 @@
     onreorderover,
     onreorderdrop,
     onreorderend,
+    reorderable = true,
   }: {
     app: DockApp;
     variant: Variant;
@@ -23,6 +24,7 @@
     onreorderover?: (command: string, after: boolean) => void;
     onreorderdrop?: () => void;
     onreorderend?: () => void;
+    reorderable?: boolean;
   } = $props();
 
   let launchRaised = $state(false);
@@ -99,7 +101,7 @@
   }
 
   function pointerDown(event: PointerEvent) {
-    if (!onreorderstart || event.button !== 0) return;
+    if (!reorderable || !onreorderstart || event.button !== 0) return;
     reorderPointerId = event.pointerId;
     reorderStartX = event.clientX;
     reorderStartY = event.clientY;

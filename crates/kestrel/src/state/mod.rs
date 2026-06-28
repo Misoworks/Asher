@@ -12,6 +12,7 @@ use asher_ipc::{ShellStatus, XwaylandStatus};
 use asher_layout::{LayoutEngine, LayoutError, Rect, WindowId, WindowInfo, WorkspaceId};
 use smithay::{
     backend::allocator::format::FormatSet,
+    desktop::PopupManager,
     input::{
         Seat, SeatState,
         keyboard::KeyboardHandle,
@@ -54,6 +55,7 @@ pub struct KestrelState {
     pub outputs: OutputGraph,
     pub layout: LayoutEngine,
     pub windows: WindowStack,
+    pub popup_manager: PopupManager,
     pub pointer_location: Point<f64, Logical>,
     pub drag: Option<WindowGrab>,
     pub pending_window_drag: Option<PendingWindowDrag>,
@@ -123,6 +125,7 @@ impl KestrelState {
             outputs,
             layout,
             windows: WindowStack::default(),
+            popup_manager: PopupManager::default(),
             pointer_location: (0.0, 0.0).into(),
             drag: None,
             pending_window_drag: None,
@@ -491,12 +494,21 @@ impl KestrelState {
         layers::arrange(self.output());
     }
 
-    pub fn cleanup_layers(&self) {
+    pub fn cleanup_layers(&mut self) {
         layers::cleanup(self.output());
+        self.popup_manager.cleanup();
     }
 
     pub fn layer_surfaces(&self) -> Vec<WlSurface> {
-        layers::surfaces(self.output())
+        let mut surfaces = layers::surfaces(self.output());
+        let roots = surfaces.clone();
+        for root in roots {
+            surfaces.extend(
+                PopupManager::popups_for_surface(&root)
+                    .map(|(popup, _)| popup.wl_surface().clone()),
+            );
+        }
+        surfaces
     }
 }
 

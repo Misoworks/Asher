@@ -6,6 +6,7 @@ use crate::{
 };
 use asher_layout::WorkspaceId;
 use smithay::{
+    desktop::{PopupManager, layer_map_for_output},
     reexports::{
         wayland_protocols::ext::background_effect::v1::server::{
             ext_background_effect_manager_v1::{self, Capability, ExtBackgroundEffectManagerV1},
@@ -18,7 +19,10 @@ use smithay::{
         },
     },
     utils::{Logical, Point, Rectangle},
-    wayland::compositor::{self, Cacheable, RectangleKind, RegionAttributes},
+    wayland::{
+        compositor::{self, Cacheable, RectangleKind, RegionAttributes},
+        shell::wlr_layer::Layer,
+    },
 };
 use std::sync::{
     Mutex,
@@ -217,6 +221,32 @@ pub fn window_blur_targets(state: &KestrelState) -> Vec<LayerRenderTarget> {
     targets
 }
 
+pub fn layer_popup_blur_targets(state: &KestrelState, layer: Layer) -> Vec<LayerRenderTarget> {
+    let layer_map = layer_map_for_output(state.output());
+    let Some(blur_layer) = BlurLayer::from_shell_layer(layer) else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for parent in layer_map.layers_on(layer) {
+        let Some(parent_geometry) = layer_map.layer_geometry(parent) else {
+            continue;
+        };
+        for (popup, popup_offset) in PopupManager::popups_for_surface(parent.wl_surface()) {
+            let popup_geometry = popup.geometry();
+            let popup_location = parent_geometry.loc + popup_offset - popup_geometry.loc;
+            append_surface_region_targets(
+                popup.wl_surface(),
+                blur_layer,
+                popup_location,
+                popup_geometry.size,
+                LayerMaterial::RoundRect { radius: 18 },
+                &mut targets,
+            );
+        }
+    }
+    targets
+}
+
 fn append_workspace_targets(
     state: &KestrelState,
     workspace: &WorkspaceId,
@@ -249,26 +279,50 @@ fn append_workspace_targets(
         };
         let clip = Rectangle::from_size(window.surface_geometry().size);
         for rect in rects_for_region(&region, clip) {
+            let location = Point::from((
+                (transform.x + (surface_offset.x + rect.loc.x) as f64 * transform.scale).round()
+                    as i32,
+                (transform.y
+                    + (titlebar_height + surface_offset.y + rect.loc.y) as f64 * transform.scale)
+                    .round() as i32,
+            ));
+            let size = (
+                (rect.size.w as f64 * transform.scale).round().max(1.0) as i32,
+                (rect.size.h as f64 * transform.scale).round().max(1.0) as i32,
+            )
+                .into();
             targets.push(LayerRenderTarget {
                 surface: surface.clone(),
                 blur_layer: BlurLayer::Window,
                 material: LayerMaterial::Rect,
                 opacity: 1.0,
-                location: Point::from((
-                    (transform.x + (surface_offset.x + rect.loc.x) as f64 * transform.scale).round()
-                        as i32,
-                    (transform.y
-                        + (titlebar_height + surface_offset.y + rect.loc.y) as f64
-                            * transform.scale)
-                        .round() as i32,
-                )),
-                size: (
-                    (rect.size.w as f64 * transform.scale).round().max(1.0) as i32,
-                    (rect.size.h as f64 * transform.scale).round().max(1.0) as i32,
-                )
-                    .into(),
+                location,
+                size,
             });
         }
+    }
+}
+
+fn append_surface_region_targets(
+    surface: &WlSurface,
+    blur_layer: BlurLayer,
+    location: Point<i32, Logical>,
+    size: smithay::utils::Size<i32, Logical>,
+    material: LayerMaterial,
+    targets: &mut Vec<LayerRenderTarget>,
+) {
+    let Some(region) = current_blur_region(surface) else {
+        return;
+    };
+    for rect in rects_for_region(&region, Rectangle::from_size(size)) {
+        targets.push(LayerRenderTarget {
+            surface: surface.clone(),
+            blur_layer,
+            material,
+            opacity: 1.0,
+            location: (location.x + rect.loc.x, location.y + rect.loc.y).into(),
+            size: rect.size,
+        });
     }
 }
 

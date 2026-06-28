@@ -69,6 +69,13 @@ impl SessionEnvironment {
             ("XDG_SESSION_DESKTOP", self.xdg_session_desktop.as_str()),
             ("DESKTOP_SESSION", self.desktop_session.as_str()),
             ("XDG_SESSION_TYPE", self.xdg_session_type.as_str()),
+            ("GDK_BACKEND", "wayland,x11"),
+            ("QT_QPA_PLATFORM", "wayland;xcb"),
+            ("SDL_VIDEODRIVER", "wayland"),
+            ("CLUTTER_BACKEND", "wayland"),
+            ("MOZ_ENABLE_WAYLAND", "1"),
+            ("ELECTRON_OZONE_PLATFORM_HINT", "auto"),
+            ("NO_AT_BRIDGE", "1"),
         ]
     }
 

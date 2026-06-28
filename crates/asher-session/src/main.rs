@@ -67,10 +67,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let backend = selected_backend(&args, loaded.config.compositor.backend);
-    let explicit_kestrel = args.kestrel.is_some() || env::var_os("ASHER_KESTREL").is_some();
-    if !args.dry_run && !explicit_kestrel {
-        ensure_dev_helpers_built(backend)?;
-    }
     let kestrel = resolve_kestrel(args.kestrel.clone());
     let environment = SessionEnvironment::default();
     let mut command = session_command(&kestrel, backend);
@@ -176,61 +172,6 @@ fn sibling_binary(name: &str) -> Option<PathBuf> {
     let mut path = env::current_exe().ok()?;
     path.set_file_name(name);
     path.exists().then_some(path)
-}
-
-fn ensure_dev_helpers_built(backend: KestrelBackend) -> io::Result<()> {
-    let Some(workspace) = dev_workspace() else {
-        return Ok(());
-    };
-
-    let mut command = Command::new("cargo");
-    command
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(&workspace.manifest)
-        .arg("-p")
-        .arg("kestrel")
-        .arg("-p")
-        .arg("asher-shell")
-        .arg("-p")
-        .arg("asher-settings");
-    if matches!(backend, KestrelBackend::Session) {
-        command.arg("--features").arg("kestrel/session-backend");
-    }
-    if workspace.release {
-        command.arg("--release");
-    }
-
-    let status = command.status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
-            "cargo failed to build Asher helper binaries: {status}"
-        )))
-    }
-}
-
-struct DevWorkspace {
-    manifest: PathBuf,
-    release: bool,
-}
-
-fn dev_workspace() -> Option<DevWorkspace> {
-    let exe = env::current_exe().ok()?;
-    let target = exe
-        .ancestors()
-        .find(|path| path.file_name() == Some("target".as_ref()))?;
-    let manifest = target.parent()?.join("Cargo.toml");
-    if !manifest.is_file() {
-        return None;
-    }
-    let release = exe
-        .strip_prefix(target)
-        .ok()?
-        .components()
-        .any(|component| component.as_os_str() == "release");
-    Some(DevWorkspace { manifest, release })
 }
 
 fn selected_backend(args: &SessionArgs, preference: BackendPreference) -> KestrelBackend {

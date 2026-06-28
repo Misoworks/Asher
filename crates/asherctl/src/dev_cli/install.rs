@@ -78,7 +78,7 @@ pub fn install_session(
         target_dir.join("asher-session")
     };
 
-    install_desktop_entry(&args.session_dir, &session_binary, args.copy_binaries)?;
+    install_desktop_entry(&args.session_dir, &session_binary)?;
     install_portal_config(root, &args.portal_dir)?;
     install_pam_config(root, &args.pam_dir)?;
 
@@ -142,15 +142,11 @@ fn copy_binaries(source_dir: &Path, bin_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn install_desktop_entry(
-    session_dir: &Path,
-    session_binary: &Path,
-    include_try_exec: bool,
-) -> io::Result<()> {
+fn install_desktop_entry(session_dir: &Path, session_binary: &Path) -> io::Result<()> {
     fs::create_dir_all(session_dir)?;
     fs::write(
         session_dir.join("asher.desktop"),
-        desktop_entry(session_binary, include_try_exec),
+        desktop_entry(session_binary),
     )
 }
 
@@ -172,16 +168,11 @@ fn install_pam_config(root: &Path, pam_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn desktop_entry(session_binary: &Path, include_try_exec: bool) -> String {
-    let try_exec = if include_try_exec {
-        format!("TryExec={}\n", session_binary.display())
-    } else {
-        String::new()
-    };
+fn desktop_entry(session_binary: &Path) -> String {
     format!(
-        "[Desktop Entry]\nName=Asher\nComment=Asher Desktop Environment\nExec={} --session --guard\n{}Type=Application\nDesktopNames=Asher\nKeywords=wayland;desktop;session;\n",
+        "[Desktop Entry]\nName=Asher\nComment=Asher Desktop Environment\nExec={} --session --guard\nTryExec={}\nType=Application\nDesktopNames=Asher\nKeywords=wayland;desktop;session;\n",
         quoted_path(session_binary),
-        try_exec
+        session_binary.display(),
     )
 }
 

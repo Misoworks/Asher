@@ -23,6 +23,7 @@ use crate::{
     session_services,
     shell::ShellProcess,
     state::KestrelState,
+    submitted_damage::SubmittedDamageHistory,
     window_clip::window_elements,
     xwayland::XwaylandSatellite,
 };
@@ -39,7 +40,7 @@ use smithay::{
         wayland_server::{Display, ListeningSocket},
         winit::platform::pump_events::PumpStatus,
     },
-    utils::{Physical, Rectangle},
+    utils::{Physical, Rectangle, Transform},
     wayland::shell::wlr_layer::Layer,
 };
 use std::{
@@ -96,6 +97,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
     let mut last_refresh_check = Instant::now() - REFRESH_CHECK_INTERVAL;
     let mut damage_tracker = DamageTracker::new(output.size);
     let mut blur_damage_tracker = DamageTracker::new(output.size);
+    let mut submitted_damage = SubmittedDamageHistory::default();
     let mut clients = Vec::new();
     let session_started = Instant::now();
     let mut previous_frame_ms = 0.0f32;
@@ -143,6 +145,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             WinitEvent::Resized { size, .. } => {
                 if output.resize(size) {
                     state.set_output_size(output.size);
+                    submitted_damage.clear();
                     force_full_damage = true;
                 }
             }
@@ -160,6 +163,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
 
         if output.resize(backend.window_size()) {
             state.set_output_size(output.size);
+            submitted_damage.clear();
             force_full_damage = true;
         }
         let refresh_check_interval = if host_refresh_known {
@@ -269,16 +273,28 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                 .fullscreen_on_workspace(state.layout.active_workspace())
                 .is_some();
             let panel_taskbar = state.layout.active_mode() == asher_layout::ModeId::Panel;
-            let top_targets = if fullscreen_active {
+            let mut top_targets = if fullscreen_active {
                 Vec::new()
             } else {
                 layers::render_targets(state.output(), Layer::Top, panel_taskbar)
             };
-            let overlay_targets = if fullscreen_active {
+            if !fullscreen_active {
+                top_targets.extend(background_effect::layer_popup_blur_targets(
+                    &state,
+                    Layer::Top,
+                ));
+            }
+            let mut overlay_targets = if fullscreen_active {
                 Vec::new()
             } else {
                 layers::render_targets(state.output(), Layer::Overlay, panel_taskbar)
             };
+            if !fullscreen_active {
+                overlay_targets.extend(background_effect::layer_popup_blur_targets(
+                    &state,
+                    Layer::Overlay,
+                ));
+            }
             let background_element = if show_loading {
                 background.blurred_render_element(renderer, output.size)?
             } else {
@@ -292,10 +308,6 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             let bottom_layer =
                 render_stage_elements(renderer, &state, RenderStage::Layer(Layer::Bottom));
             let window_effect_targets = background_effect::window_blur_targets(&state);
-            let blur_targets_active = !window_effect_targets.is_empty()
-                || !top_targets.is_empty()
-                || !overlay_targets.is_empty();
-            let blur_needs_full_buffer = blur_enabled && blur_targets_active && buffer_age > 1;
             if blur_enabled {
                 let mut blur_targets = window_effect_targets.clone();
                 blur_targets.extend(top_targets.iter().cloned());
@@ -376,7 +388,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                 damage_tracker.plan(
                     output.size,
                     buffer_age,
-                    force_full_damage || blur_animating || blur_needs_full_buffer,
+                    force_full_damage || blur_animating,
                     &damage_elements,
                 )
             };
@@ -390,7 +402,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                 blur_damage_tracker.plan(
                     output.size,
                     buffer_age,
-                    force_full_damage || blur_animating || blur_needs_full_buffer,
+                    force_full_damage || blur_animating,
                     &blur_damage_elements,
                 )
             };
@@ -404,6 +416,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             } else {
                 damage_plan.rectangles.clone()
             };
+            let damage = submitted_damage.accumulate(output.size, &damage, buffer_age);
             let blur_damage = blur_damage_plan.rectangles.clone();
             previous_damage_area = damage_area(&damage);
             if !damage.is_empty() {
@@ -415,6 +428,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                     SceneRenderRequest {
                         state: &state,
                         output_size: output.size,
+                        target_transform: Transform::Normal,
                         damage: &damage,
                         blur_damage: &blur_damage,
                         blur_enabled,
@@ -448,6 +462,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             }
 
             backend.submit(Some(&submit_damage))?;
+            submitted_damage.record(output.size, &submit_damage);
             fps_frames += 1;
             previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
             pace_frame(frame_started, frame_interval);

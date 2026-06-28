@@ -1,4 +1,6 @@
 #[cfg(feature = "session-backend")]
+mod cursor;
+#[cfg(feature = "session-backend")]
 mod device;
 #[cfg(feature = "session-backend")]
 mod frame;

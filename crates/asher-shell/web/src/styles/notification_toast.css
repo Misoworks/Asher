@@ -191,33 +191,10 @@
 }
 
 #app.is-surface-opening[data-surface="notification-toast"] .notification-toast {
-  animation: notification-toast-in 190ms var(--ease-shell) both;
+  will-change: transform;
 }
 
 #app.is-surface-closing[data-surface="notification-toast"] .notification-toast {
-  animation: notification-toast-out 100ms var(--ease-shell) both;
-}
-
-@keyframes notification-toast-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes notification-toast-out {
-  from {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-
-  to {
-    opacity: 0;
-    transform: translate3d(0, -5px, 0) scale(0.99);
-  }
+  pointer-events: none;
+  will-change: transform;
 }

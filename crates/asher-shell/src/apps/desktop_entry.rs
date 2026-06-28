@@ -1,4 +1,4 @@
-use super::{resolve_icon_path, xdg};
+use super::{normalize_launch_command, resolve_icon_path, xdg};
 use asher_config::AsherConfig;
 use std::{
     collections::BTreeMap,
@@ -120,6 +120,7 @@ fn parse_desktop_entry(path: &Path, config: &AsherConfig) -> Option<AppEntry> {
     } else {
         exec
     };
+    let command = normalize_launch_command(&command);
 
     let icon = values.get("Icon").map(|value| value.trim().to_string());
     let icon_path = resolve_icon_path(icon.as_deref())

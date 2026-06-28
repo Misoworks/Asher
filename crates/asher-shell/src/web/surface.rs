@@ -24,7 +24,6 @@ const DATE_CENTER_WIDTH: i32 = 360;
 const DATE_CENTER_HEIGHT: i32 = 560;
 const START_MENU_WIDTH: i32 = 720;
 const START_MENU_HEIGHT: i32 = 640;
-const TRANSIENT_SURFACE_IDLE_TTL: Duration = Duration::from_secs(8);
 
 pub struct WebSurfaces {
     pub dock: WebSurface,
@@ -103,19 +102,18 @@ impl WebSurfaces {
             ),
             notification_toast: LazyWebSurface::new(
                 WebShellSurface::NotificationToast,
-                notification_toast_size(),
+                notification_toast_size(snapshot),
                 panel_taskbar,
                 &actions_tx,
                 snapshot,
             ),
         };
+        surfaces.sidebar.prewarm();
         surfaces.quick.prewarm();
         surfaces.date.prewarm();
-        if shell_prewarm_enabled() {
-            surfaces.start_menu.prewarm();
-        }
-        surfaces.dock_menu.ensure_created();
-        surfaces.notification_toast.ensure_created();
+        surfaces.start_menu.prewarm();
+        surfaces.dock_menu.prewarm();
+        surfaces.notification_toast.prewarm();
         Ok(surfaces)
     }
 
@@ -129,6 +127,8 @@ impl WebSurfaces {
         self.quick.resize(quick_settings_size(snapshot));
         self.quick.evaluate_snapshot(snapshot, json);
         self.date.evaluate_snapshot(snapshot, json);
+        self.notification_toast
+            .resize(notification_toast_size(snapshot));
         self.notification_toast.evaluate_snapshot(snapshot, json);
     }
 
@@ -878,11 +878,10 @@ fn close_animation_duration(kind: WebShellSurface) -> Option<Duration> {
         WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
             Some(Duration::from_millis(170))
         }
-        WebShellSurface::DockMenu => Some(Duration::from_millis(170)),
-        WebShellSurface::Panel
-        | WebShellSurface::Dock
-        | WebShellSurface::Sidebar
-        | WebShellSurface::NotificationToast => None,
+        WebShellSurface::DockMenu | WebShellSurface::NotificationToast => {
+            Some(Duration::from_millis(170))
+        }
+        WebShellSurface::Panel | WebShellSurface::Dock | WebShellSurface::Sidebar => None,
     }
 }
 
@@ -892,11 +891,10 @@ fn open_animation_duration(kind: WebShellSurface) -> Option<Duration> {
         WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
             Some(Duration::from_millis(190))
         }
-        WebShellSurface::DockMenu => Some(Duration::from_millis(190)),
-        WebShellSurface::Panel
-        | WebShellSurface::Dock
-        | WebShellSurface::Sidebar
-        | WebShellSurface::NotificationToast => None,
+        WebShellSurface::DockMenu | WebShellSurface::NotificationToast => {
+            Some(Duration::from_millis(190))
+        }
+        WebShellSurface::Panel | WebShellSurface::Dock | WebShellSurface::Sidebar => None,
     }
 }
 
@@ -912,7 +910,10 @@ fn shell_surface_frame_rate() -> u32 {
 fn surface_alpha_animates(kind: WebShellSurface) -> bool {
     !matches!(
         kind,
-        WebShellSurface::StartMenu | WebShellSurface::QuickSettings | WebShellSurface::DateCenter
+        WebShellSurface::StartMenu
+            | WebShellSurface::QuickSettings
+            | WebShellSurface::DateCenter
+            | WebShellSurface::NotificationToast
     )
 }
 
@@ -923,16 +924,18 @@ fn surface_margin_animates(kind: WebShellSurface) -> bool {
             | WebShellSurface::QuickSettings
             | WebShellSurface::DateCenter
             | WebShellSurface::DockMenu
+            | WebShellSurface::NotificationToast
     )
 }
 
 fn hidden_process_ttl(kind: WebShellSurface) -> Option<Duration> {
     match kind {
-        WebShellSurface::StartMenu => None,
-        WebShellSurface::QuickSettings | WebShellSurface::DateCenter => None,
-        WebShellSurface::DockMenu
+        WebShellSurface::StartMenu
+        | WebShellSurface::QuickSettings
+        | WebShellSurface::DateCenter
+        | WebShellSurface::DockMenu
         | WebShellSurface::NotificationToast
-        | WebShellSurface::Sidebar => Some(TRANSIENT_SURFACE_IDLE_TTL),
+        | WebShellSurface::Sidebar => None,
         WebShellSurface::Panel | WebShellSurface::Dock => None,
     }
 }
@@ -959,6 +962,9 @@ fn hidden_shell_margin(
         }
         WebShellSurface::DockMenu => {
             margin.bottom = -(size.1 + 8);
+        }
+        WebShellSurface::NotificationToast => {
+            margin.right = -(size.0 + 12);
         }
         WebShellSurface::DateCenter => {
             margin.right = -(size.0 + 8);
@@ -992,15 +998,10 @@ fn shell_blur_region(kind: WebShellSurface, _width: i32, _height: i32) -> Window
         WebShellSurface::QuickSettings | WebShellSurface::DateCenter => {
             WindowRegion::adaptive_rounded_rect(26)
         }
+        WebShellSurface::NotificationToast => WindowRegion::adaptive_rounded_rect(22),
         WebShellSurface::StartMenu => WindowRegion::adaptive_rounded_rect(24),
         _ => WindowRegion::adaptive_full(),
     }
-}
-
-fn shell_prewarm_enabled() -> bool {
-    env::var("ASHER_SHELL_PREWARM")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
 }
 
 fn runtime_config() -> RuntimeConfig {

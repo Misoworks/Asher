@@ -1,8 +1,10 @@
 use super::model::{WebDockApp, WebShellSnapshot, WebWindow};
+use crate::apps::normalize_launch_command;
 
 pub(crate) const QUICK_SETTINGS_WIDTH: i32 = 420;
 pub(crate) const NOTIFICATION_TOAST_WIDTH: i32 = 380;
-pub(crate) const NOTIFICATION_TOAST_HEIGHT: i32 = 136;
+pub(crate) const NOTIFICATION_TOAST_BASE_HEIGHT: i32 = 136;
+pub(crate) const NOTIFICATION_TOAST_ACTION_HEIGHT: i32 = 171;
 pub(crate) const DOCK_MENU_WIDTH: i32 = 184;
 
 pub(crate) fn quick_settings_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
@@ -19,25 +21,35 @@ pub(crate) fn quick_settings_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
     (QUICK_SETTINGS_WIDTH, height)
 }
 
-pub(crate) fn notification_toast_size() -> (i32, i32) {
-    (NOTIFICATION_TOAST_WIDTH, NOTIFICATION_TOAST_HEIGHT)
+pub(crate) fn notification_toast_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
+    let height = snapshot
+        .toast_notifications
+        .first()
+        .filter(|notification| {
+            notification
+                .actions
+                .iter()
+                .any(|action| action.key != "default")
+        })
+        .map(|_| NOTIFICATION_TOAST_ACTION_HEIGHT)
+        .unwrap_or(NOTIFICATION_TOAST_BASE_HEIGHT);
+    (NOTIFICATION_TOAST_WIDTH, height)
 }
 
 pub(crate) fn dock_menu_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
     let Some(command) = &snapshot.dock_menu_command else {
         return (DOCK_MENU_WIDTH, 128);
     };
-    let Some(app) = snapshot
-        .dock_apps
-        .iter()
-        .find(|entry| entry.command == *command)
-    else {
+    let Some(app) = snapshot.dock_apps.iter().find(|entry| {
+        normalize_launch_command(&entry.command) == normalize_launch_command(command)
+    }) else {
         return (DOCK_MENU_WIDTH, 128);
     };
     let window = matched_window(app, &snapshot.windows);
-    let action_count = if window.is_some() {
-        let focus = i32::from(!window.is_some_and(|window| window.active));
-        focus + 4
+    let action_count = if let Some(window) = window {
+        let focus = i32::from(!window.active);
+        let open_new = i32::from(app.pinned);
+        focus + open_new + 3
     } else if app.running {
         3
     } else {
@@ -69,6 +81,9 @@ fn matched_window<'a>(app: &WebDockApp, windows: &'a [WebWindow]) -> Option<&'a 
 }
 
 fn window_matches_app(window: &WebWindow, app: &WebDockApp) -> bool {
+    if app.window_id.is_some_and(|id| id == window.id) {
+        return true;
+    }
     let command = command_name(&app.command);
     let label = app.label.to_lowercase();
     [window.app_id.as_deref(), Some(window.title.as_str())]

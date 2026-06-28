@@ -1,4 +1,4 @@
-use super::{DrmError, scanout::DirectScanout};
+use super::{DrmError, cursor::HardwareCursor, scanout::DirectScanout};
 use crate::output::OutputDescriptor;
 use smithay::{
     backend::{
@@ -49,6 +49,7 @@ pub struct SessionDevice {
     _session: LibSeatSession,
     pub active_device_id: u64,
     pub drm: DrmDevice,
+    cursor: HardwareCursor,
     outputs: Vec<SessionOutput>,
     primary: usize,
     gbm: GbmDevice<DrmDeviceFd>,
@@ -122,6 +123,7 @@ pub fn open(_display: &DisplayHandle) -> Result<OpenedSessionDevice, DrmError> {
         .into_iter()
         .collect::<Vec<_>>();
     let import_node = DrmNode::from_file(&drm_fd).ok();
+    let cursor = HardwareCursor::new(&drm)?;
     let outputs = create_session_outputs(
         &mut drm,
         gbm.clone(),
@@ -150,6 +152,7 @@ pub fn open(_display: &DisplayHandle) -> Result<OpenedSessionDevice, DrmError> {
             _session: session,
             active_device_id,
             drm,
+            cursor,
             outputs,
             primary: 0,
             gbm,
@@ -238,6 +241,11 @@ impl SessionDevice {
         }
     }
 
+    pub fn sync_cursor(&mut self, state: &mut crate::state::KestrelState) {
+        let crtcs = self.outputs.iter().map(|output| output.output.crtc);
+        self.cursor.sync(&self.drm, crtcs, state);
+    }
+
     pub fn frame_submitted(&mut self, crtc: crtc::Handle) -> Result<(), DrmError> {
         let Some(output) = self
             .outputs
@@ -264,6 +272,7 @@ impl SessionDevice {
     }
 
     fn reset_surfaces(&mut self) -> Result<(), DrmError> {
+        self.cursor.reset();
         for output in &mut self.outputs {
             output.surface.surface().reset_state().map_err(|error| {
                 DrmError::Unsupported(format!("failed to reset DRM surface: {error}"))

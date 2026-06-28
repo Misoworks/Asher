@@ -19,6 +19,7 @@ use crate::{
     scene_blur::SceneBlurCache,
     scene_render::{SceneRenderRequest, render_scene},
     state::KestrelState,
+    submitted_damage::SubmittedDamageHistory,
     window_clip::window_elements,
 };
 use smithay::{
@@ -53,7 +54,7 @@ pub fn render_secondary_output(
         DrmError::Unsupported(format!("failed to bind secondary GBM buffer: {error}"))
     })?;
     let mut frame = renderer
-        .render(&mut framebuffer, size, Transform::Flipped180)
+        .render(&mut framebuffer, size, Transform::Normal)
         .map_err(render_error)?;
     frame
         .clear(Color32F::new(0.08, 0.085, 0.09, 1.0), &damage)
@@ -85,6 +86,7 @@ pub struct SessionFrameRenderer {
     fps_started: Instant,
     shell_layers_seen_ready: bool,
     previous_frame_direct: bool,
+    submitted_damage: SubmittedDamageHistory,
 }
 
 impl SessionFrameRenderer {
@@ -104,6 +106,7 @@ impl SessionFrameRenderer {
             fps_started: Instant::now(),
             shell_layers_seen_ready: false,
             previous_frame_direct: false,
+            submitted_damage: SubmittedDamageHistory::default(),
         }
     }
 
@@ -120,13 +123,12 @@ impl SessionFrameRenderer {
         let finished_window_closes = state.send_finished_window_closes();
         state.cleanup_layers();
         state.cleanup_output();
-        let shell_layers_ready = layers::has_shell_surface(state.output());
+        let shell_layers_ready = state.shell_status == asher_ipc::ShellStatus::Running
+            && layers::has_shell_surface(state.output());
         if shell_layers_ready {
             self.shell_layers_seen_ready = true;
         }
-        let show_loading = !shell_layers_ready
-            && (state.shell_status != asher_ipc::ShellStatus::Running
-                || !self.shell_layers_seen_ready);
+        let show_loading = !shell_layers_ready || !self.shell_layers_seen_ready;
         let scene_dirty = state.take_scene_dirty();
         let debug_needs_render =
             state.config.compositor.debug_overlay && self.debug_overlay_cache.needs_refresh();
@@ -154,16 +156,28 @@ impl SessionFrameRenderer {
             .fullscreen_on_workspace(state.layout.active_workspace())
             .is_some();
         let panel_taskbar = state.layout.active_mode() == asher_layout::ModeId::Panel;
-        let top_targets = if fullscreen_active {
+        let mut top_targets = if fullscreen_active {
             Vec::new()
         } else {
             layers::render_targets(state.output(), Layer::Top, panel_taskbar)
         };
-        let overlay_targets = if fullscreen_active {
+        if !fullscreen_active {
+            top_targets.extend(background_effect::layer_popup_blur_targets(
+                state,
+                Layer::Top,
+            ));
+        }
+        let mut overlay_targets = if fullscreen_active {
             Vec::new()
         } else {
             layers::render_targets(state.output(), Layer::Overlay, panel_taskbar)
         };
+        if !fullscreen_active {
+            overlay_targets.extend(background_effect::layer_popup_blur_targets(
+                state,
+                Layer::Overlay,
+            ));
+        }
         let background_element = if show_loading {
             self.background
                 .blurred_render_element(renderer, state.output_size())
@@ -181,9 +195,6 @@ impl SessionFrameRenderer {
         let bottom_layer =
             render_stage_elements(renderer, state, RenderStage::Layer(Layer::Bottom));
         let window_effect_targets = background_effect::window_blur_targets(state);
-        let blur_targets_active = !window_effect_targets.is_empty()
-            || !top_targets.is_empty()
-            || !overlay_targets.is_empty();
         if blur_enabled {
             let mut blur_targets = window_effect_targets.clone();
             blur_targets.extend(top_targets.iter().cloned());
@@ -234,6 +245,7 @@ impl SessionFrameRenderer {
             self.previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
             self.fps_frames += 1;
             self.previous_frame_direct = true;
+            self.submitted_damage.clear();
             self.update_fps();
             return Ok(FrameResult::Queued {
                 frame_time: self.frame_clock.next_frame(),
@@ -244,7 +256,6 @@ impl SessionFrameRenderer {
         let (mut dmabuf, buffer_age) = surface.next_buffer().map_err(|error| {
             DrmError::Unsupported(format!("failed to acquire GBM buffer: {error}"))
         })?;
-        let blur_needs_full_buffer = blur_enabled && blur_targets_active && buffer_age > 1;
         let mut framebuffer = renderer.bind(&mut dmabuf).map_err(|error| {
             DrmError::Unsupported(format!("failed to bind GBM buffer: {error}"))
         })?;
@@ -264,10 +275,7 @@ impl SessionFrameRenderer {
             self.damage_tracker.plan(
                 state.output_size(),
                 usize::from(buffer_age),
-                force_full_damage
-                    || blur_animating
-                    || self.previous_frame_direct
-                    || blur_needs_full_buffer,
+                force_full_damage || blur_animating || self.previous_frame_direct,
                 &damage_elements,
             )
         };
@@ -281,10 +289,7 @@ impl SessionFrameRenderer {
             self.blur_damage_tracker.plan(
                 state.output_size(),
                 usize::from(buffer_age),
-                force_full_damage
-                    || blur_animating
-                    || self.previous_frame_direct
-                    || blur_needs_full_buffer,
+                force_full_damage || blur_animating || self.previous_frame_direct,
                 &blur_damage_elements,
             )
         };
@@ -298,6 +303,9 @@ impl SessionFrameRenderer {
         } else {
             damage_plan.rectangles.clone()
         };
+        let damage =
+            self.submitted_damage
+                .accumulate(state.output_size(), &damage, usize::from(buffer_age));
         let blur_damage = blur_damage_plan.rectangles.clone();
         self.previous_damage_area = damage_area(&damage);
 
@@ -310,6 +318,7 @@ impl SessionFrameRenderer {
                 SceneRenderRequest {
                     state,
                     output_size,
+                    target_transform: Transform::Normal,
                     damage: &damage,
                     blur_damage: &blur_damage,
                     blur_enabled,
@@ -330,10 +339,11 @@ impl SessionFrameRenderer {
             .map_err(render_error)?;
             drop(framebuffer);
             surface
-                .queue_buffer(None, Some(damage), ())
+                .queue_buffer(None, Some(damage.clone()), ())
                 .map_err(|error| {
                     DrmError::Unsupported(format!("failed to queue DRM frame: {error}"))
                 })?;
+            self.submitted_damage.record(state.output_size(), &damage);
             self.fps_frames += 1;
             self.previous_frame_ms = frame_started.elapsed().as_secs_f32() * 1000.0;
             self.previous_frame_direct = false;
@@ -358,6 +368,7 @@ impl SessionFrameRenderer {
         self.blur_damage_tracker = DamageTracker::new(state.output_size());
         self.blur_cache.clear();
         self.debug_overlay_cache.clear();
+        self.submitted_damage.clear();
         self.previous_damage_area = 0;
         self.previous_frame_ms = 0.0;
         self.previous_frame_direct = false;

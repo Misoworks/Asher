@@ -109,24 +109,24 @@ pub fn has_layer_above_windows(output: &Output, point: Point<f64, Logical>) -> b
 pub fn should_close_transient_popover(output: &Output, point: Point<f64, Logical>) -> bool {
     let layer_map = layer_map_for_output(output);
     let mut has_transient = false;
-    for surface in layer_map.layers_on(Layer::Overlay) {
-        if !matches!(
-            surface.namespace(),
-            "asher-quick-settings" | "asher-date-center" | "asher-start-menu"
-        ) {
-            continue;
-        }
-        if !surface_accepts_input(surface) {
-            continue;
-        }
-        has_transient = true;
-        let Some(geometry) = layer_map.layer_geometry(surface) else {
-            continue;
-        };
-        let (location, size) =
-            material_geometry(surface.namespace(), geometry.loc, geometry.size, false);
-        if point_in_rect(point, location, size) {
-            return false;
+    for layer in [Layer::Overlay, Layer::Top] {
+        for surface in layer_map.layers_on(layer) {
+            if !matches!(
+                surface.namespace(),
+                "asher-quick-settings"
+                    | "asher-date-center"
+                    | "asher-start-menu"
+                    | "asher-dock-menu"
+            ) {
+                continue;
+            }
+            if !surface_accepts_input(surface) {
+                continue;
+            }
+            has_transient = true;
+            if point_inside_layer_or_popup(&layer_map, surface, point) {
+                return false;
+            }
         }
     }
     has_transient
@@ -227,7 +227,7 @@ pub enum BlurLayer {
 }
 
 impl BlurLayer {
-    fn from_shell_layer(layer: Layer) -> Option<Self> {
+    pub(crate) fn from_shell_layer(layer: Layer) -> Option<Self> {
         match layer {
             Layer::Top => Some(Self::Top),
             Layer::Overlay => Some(Self::Overlay),
@@ -315,7 +315,7 @@ fn pointer_focus_on_layer(
     surfaces.reverse();
     for layer_surface in surfaces {
         if !surface_accepts_input(layer_surface)
-            || !point_inside_layer_material(&layer_map, layer_surface, point)
+            || !point_inside_layer_or_popup(&layer_map, layer_surface, point)
         {
             continue;
         }
@@ -352,6 +352,26 @@ fn point_inside_layer_material(
     let (location, size) =
         material_geometry(surface.namespace(), geometry.loc, geometry.size, false);
     point_in_rect(point, location, size)
+}
+
+fn point_inside_layer_or_popup(
+    layer_map: &smithay::desktop::LayerMap,
+    surface: &LayerSurface,
+    point: Point<f64, Logical>,
+) -> bool {
+    if point_inside_layer_material(layer_map, surface, point) {
+        return true;
+    }
+    let Some(geometry) = layer_map.layer_geometry(surface) else {
+        return false;
+    };
+    let point_in_layer: Point<f64, Logical> = (
+        point.x - f64::from(geometry.loc.x),
+        point.y - f64::from(geometry.loc.y),
+    )
+        .into();
+    let popup_bounds = surface.bbox_with_popups();
+    point_in_rect(point_in_layer, popup_bounds.loc, popup_bounds.size)
 }
 
 fn point_in_rect(

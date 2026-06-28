@@ -20,7 +20,7 @@
 
   onMount(() => {
     const closePowerMenu = () => {
-      window.fenestra?.popup?.close?.();
+      void closeNativePopup();
       powerMenuOpen = false;
     };
     window.addEventListener("fenestra:asher.surface-open", closePowerMenu);
@@ -49,13 +49,13 @@
     sendAction({ type: "notification-do-not-disturb", enabled: !snapshot.doNotDisturb });
   }
 
-  function togglePowerMenu(event: MouseEvent) {
-    const popup = window.fenestra?.popup;
-    if (!popup?.open || !popup.close) {
+  async function togglePowerMenu(event: MouseEvent) {
+    if (!canUseNativePopup()) {
+      console.warn("native popup protocol is unavailable in this Fenestra surface");
       return;
     }
     if (powerMenuOpen) {
-      popup.close();
+      await closeNativePopup();
       powerMenuOpen = false;
       return;
     }
@@ -66,17 +66,39 @@
     const rect = target.getBoundingClientRect();
     const width = 188;
     const height = 172;
-    const opened = popup.open({
-      x: Math.round(rect.right - width),
-      y: Math.round(rect.bottom + 8),
-      width,
-      height,
-      html: sessionMenuDocument(),
-    });
-    powerMenuOpen = true;
-    void Promise.resolve(opened).catch(() => {
+    try {
+      await openNativePopup({
+        x: Math.round(rect.right - width),
+        y: Math.round(rect.bottom + 8),
+        width,
+        height,
+        html: sessionMenuDocument(),
+      });
+      powerMenuOpen = true;
+    } catch (error) {
       powerMenuOpen = false;
-    });
+      console.error("failed to open native power popup", error);
+    }
+  }
+
+  function canUseNativePopup() {
+    const bridge = window.fenestra?.bridge;
+    return Boolean(
+      window.fenestra?.popup?.open ||
+        (bridge?.commands.includes("fenestra.popup.open") && bridge.commands.includes("fenestra.popup.close")),
+    );
+  }
+
+  function openNativePopup(options: { x: number; y: number; width: number; height: number; html: string }) {
+    const popup = window.fenestra?.popup;
+    if (popup?.open) return popup.open(options);
+    return window.fenestra?.bridge?.invoke("fenestra.popup.open", options);
+  }
+
+  function closeNativePopup() {
+    const popup = window.fenestra?.popup;
+    if (popup?.close) return popup.close();
+    return window.fenestra?.bridge?.invoke("fenestra.popup.close", {});
   }
 
   function sessionMenuDocument() {

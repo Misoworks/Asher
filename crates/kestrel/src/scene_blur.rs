@@ -205,6 +205,7 @@ impl SceneBlurCache {
         renderer: &mut GlesRenderer,
         framebuffer: &GlesTarget<'_>,
         output_size: Size<i32, Physical>,
+        target_transform: Transform,
         target: &LayerRenderTarget,
         rect: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -237,6 +238,7 @@ impl SceneBlurCache {
                     renderer,
                     framebuffer,
                     output_size,
+                    target_transform,
                     sample_rect,
                     capture_size,
                     &mut entry.capture,
@@ -279,6 +281,7 @@ impl SceneBlurCache {
                     renderer,
                     framebuffer,
                     output_size,
+                    target_transform,
                     sample_rect,
                     capture_size,
                     &mut capture,
@@ -355,6 +358,7 @@ pub fn capture_blur_elements(
     renderer: &mut GlesRenderer,
     framebuffer: &GlesTarget<'_>,
     output_size: Size<i32, Physical>,
+    target_transform: Transform,
     targets: &[LayerRenderTarget],
     damage: &[Rectangle<i32, Physical>],
     enabled: bool,
@@ -368,8 +372,15 @@ pub fn capture_blur_elements(
         let Some(rect) = clipped_target_rect(output_size, target) else {
             continue;
         };
-        let (entry, opacity) =
-            cache.buffer_for_target(renderer, framebuffer, output_size, target, rect, damage)?;
+        let (entry, opacity) = cache.buffer_for_target(
+            renderer,
+            framebuffer,
+            output_size,
+            target_transform,
+            target,
+            rect,
+            damage,
+        )?;
         elements.push(render_element(renderer, rect, entry, opacity));
     }
 
@@ -412,14 +423,17 @@ fn capture_target(
     renderer: &mut GlesRenderer,
     framebuffer: &GlesTarget<'_>,
     output_size: Size<i32, Physical>,
+    target_transform: Transform,
     rect: Rectangle<i32, Physical>,
     texture_size: Size<i32, Physical>,
     capture: &mut GlesTexture,
 ) -> Result<(), GlesError> {
-    let source = Rectangle::<i32, Physical>::new(
-        (rect.loc.x, output_size.h - rect.loc.y - rect.size.h).into(),
-        rect.size,
-    );
+    let source_y = if target_transform == Transform::Flipped180 {
+        output_size.h - rect.loc.y - rect.size.h
+    } else {
+        rect.loc.y
+    };
+    let source = Rectangle::<i32, Physical>::new((rect.loc.x, source_y).into(), rect.size);
     let target = Rectangle::<i32, Physical>::from_size(texture_size);
     let mut target_framebuffer = renderer.bind(capture)?;
     renderer.blit(
@@ -478,7 +492,7 @@ fn render_blur_texture(
     }
 
     let mut target = renderer.bind(pass.blurred)?;
-    let mut frame = renderer.render(&mut target, pass.texture_size, Transform::Flipped180)?;
+    let mut frame = renderer.render(&mut target, pass.texture_size, Transform::Normal)?;
     let full_damage = [Rectangle::<i32, Physical>::from_size(pass.texture_size)];
     frame.clear(
         smithay::backend::renderer::Color32F::new(0.0, 0.0, 0.0, 0.0),

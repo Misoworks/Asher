@@ -15,6 +15,8 @@
     close();
     if (!forceNew && window) {
       sendAction({ type: "window-activate", window: window.id });
+    } else if (app.windowId !== undefined && !forceNew) {
+      sendAction({ type: "window-activate", window: app.windowId });
     } else {
       sendAction({ type: "dock-launch", command: app.command });
     }
@@ -49,6 +51,7 @@
   }
 
   function windowMatchesApp(window: WindowItem, app: DockApp) {
+    if (app.windowId === window.id) return true;
     const command = commandName(app.command);
     const label = app.label.toLowerCase();
     return [window.appId, window.title].some((value) => {
@@ -72,9 +75,11 @@
             <span>Focus</span>
           </button>
         {/if}
-        <button type="button" class="dock-menu-item" role="menuitem" onclick={() => open(app, true)}>
-          <span>Open New Window</span>
-        </button>
+        {#if app.pinned}
+          <button type="button" class="dock-menu-item" role="menuitem" onclick={() => open(app, true)}>
+            <span>Open New Window</span>
+          </button>
+        {/if}
         <button type="button" class="dock-menu-item" role="menuitem" onclick={() => minimize(window)}>
           <span>Minimize</span>
         </button>
@@ -96,9 +101,11 @@
           <span>Open</span>
         </button>
       {/if}
-      <button type="button" class="dock-menu-item" role="menuitem" onclick={() => unpin(app)}>
-        <span>Unpin from Dock</span>
-      </button>
+      {#if app.pinned}
+        <button type="button" class="dock-menu-item" role="menuitem" onclick={() => unpin(app)}>
+          <span>Unpin from Dock</span>
+        </button>
+      {/if}
     </div>
   {/if}
 </section>
