@@ -249,7 +249,9 @@ impl LazyWebSurface {
                     let now = Instant::now();
                     self.hide_started_at = Some(now);
                     self.hide_start_margin = Some(surface.shell_margin);
-                    surface.set_surface_alpha(1.0);
+                    if !surface_alpha_animates(self.kind) {
+                        surface.set_surface_alpha(1.0);
+                    }
                     surface.emit_surface_close();
                     self.hide_at = Some(now + delay);
                 } else {
@@ -908,13 +910,7 @@ fn shell_surface_frame_rate() -> u32 {
 }
 
 fn surface_alpha_animates(kind: WebShellSurface) -> bool {
-    !matches!(
-        kind,
-        WebShellSurface::StartMenu
-            | WebShellSurface::QuickSettings
-            | WebShellSurface::DateCenter
-            | WebShellSurface::NotificationToast
-    )
+    !matches!(kind, WebShellSurface::NotificationToast)
 }
 
 fn surface_margin_animates(kind: WebShellSurface) -> bool {

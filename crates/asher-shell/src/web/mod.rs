@@ -209,8 +209,11 @@ impl WebShell {
             WebShellAction::OpenLauncher => self.open_launcher(),
             WebShellAction::LaunchDefaultApp { app } => self.launch_default_app(app),
             WebShellAction::ToggleStartMenu => self.toggle_start_menu(),
+            WebShellAction::CloseStartMenu => self.close_start_menu(),
             WebShellAction::ToggleQuickSettings => self.toggle_quick_settings(),
+            WebShellAction::CloseQuickSettings => self.close_quick_settings(),
             WebShellAction::ToggleDateCenter => self.toggle_date_center(),
+            WebShellAction::CloseDateCenter => self.close_date_center(),
             WebShellAction::WorkspaceSwitch { workspace } => {
                 self.apply_model_result(switch_workspace(workspace_id(workspace)));
                 self.close_transient_popovers();
@@ -353,38 +356,91 @@ impl WebShell {
     }
 
     fn toggle_start_menu(&mut self) {
+        if self.start_menu_visible {
+            self.close_start_menu();
+        } else {
+            self.open_start_menu();
+        }
+    }
+
+    fn open_start_menu(&mut self) {
         self.quick_visible = false;
         self.date_visible = false;
-        self.start_menu_visible = !self.start_menu_visible;
+        self.start_menu_visible = true;
         self.sync_chrome();
         self.sync_surfaces();
         self.surfaces.quick.set_visible(false);
         self.surfaces.date.set_visible(false);
-        self.surfaces
-            .start_menu
-            .set_visible(self.start_menu_visible);
+        self.surfaces.start_menu.set_visible(true);
+    }
+
+    fn close_start_menu(&mut self) {
+        if !self.start_menu_visible {
+            return;
+        }
+        self.start_menu_visible = false;
+        self.sync_chrome();
+        self.sync_surfaces();
+        self.surfaces.start_menu.set_visible(false);
     }
 
     fn toggle_quick_settings(&mut self) {
+        if self.quick_visible {
+            self.close_quick_settings();
+        } else {
+            self.open_quick_settings();
+        }
+    }
+
+    fn open_quick_settings(&mut self) {
         self.date_visible = false;
         self.start_menu_visible = false;
-        self.quick_visible = !self.quick_visible;
+        self.quick_visible = true;
         self.refresh_status_now();
         self.sync_chrome();
         self.sync_surfaces();
-        self.surfaces.quick.set_visible(self.quick_visible);
+        self.surfaces.quick.set_visible(true);
         self.surfaces.date.set_visible(false);
         self.surfaces.start_menu.set_visible(false);
     }
-    fn toggle_date_center(&mut self) {
+
+    fn close_quick_settings(&mut self) {
+        if !self.quick_visible {
+            return;
+        }
         self.quick_visible = false;
-        self.start_menu_visible = false;
-        self.date_visible = !self.date_visible;
         self.sync_chrome();
         self.sync_surfaces();
-        self.surfaces.date.set_visible(self.date_visible);
+        self.surfaces.quick.set_visible(false);
+    }
+
+    fn toggle_date_center(&mut self) {
+        if self.date_visible {
+            self.close_date_center();
+        } else {
+            self.open_date_center();
+        }
+    }
+
+    fn open_date_center(&mut self) {
+        self.quick_visible = false;
+        self.start_menu_visible = false;
+        self.date_visible = true;
+        self.sync_chrome();
+        self.sync_surfaces();
+        self.surfaces.date.set_visible(true);
         self.surfaces.quick.set_visible(false);
         self.surfaces.start_menu.set_visible(false);
+    }
+
+    fn close_date_center(&mut self) {
+        if !self.date_visible {
+            return;
+        }
+        self.date_visible = false;
+        self.sync_chrome();
+        self.sync_surfaces();
+        self.surfaces.date.set_visible(false);
     }
 
     fn close_transient_popovers(&mut self) {

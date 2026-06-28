@@ -9,8 +9,11 @@ pub enum WebShellAction {
         app: asher_ipc::DefaultAppKind,
     },
     ToggleStartMenu,
+    CloseStartMenu,
     ToggleQuickSettings,
+    CloseQuickSettings,
     ToggleDateCenter,
+    CloseDateCenter,
     WorkspaceSwitch {
         workspace: String,
     },

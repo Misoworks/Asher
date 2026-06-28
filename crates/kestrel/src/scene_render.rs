@@ -123,6 +123,8 @@ fn render_flat_scene_with_cached_layer_blur(
         BlurLayer::Overlay,
         request.overlay_targets,
     )?;
+    let top_blur_damage = blur_target_damage(request.output_size, request.top_targets);
+    let overlay_blur_damage = blur_target_damage(request.output_size, request.overlay_targets);
     let mut frame = renderer.render(framebuffer, request.output_size, request.target_transform)?;
     frame.clear(Color32F::new(0.08, 0.085, 0.09, 1.0), request.damage)?;
     draw_optional_memory(&mut frame, request.background.as_ref(), request.damage)?;
@@ -130,9 +132,9 @@ fn render_flat_scene_with_cached_layer_blur(
     draw_render_elements(&mut frame, 1.0, request.bottom_layer, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.windows, request.damage)?;
     draw_render_elements(&mut frame, 1.0, request.window_chrome, request.damage)?;
-    draw_blur_elements(&mut frame, &top_blur, request.damage)?;
+    draw_blur_elements(&mut frame, &top_blur, &top_blur_damage)?;
     draw_render_elements(&mut frame, 1.0, request.top_layer, request.damage)?;
-    draw_blur_elements(&mut frame, &overlay_blur, request.damage)?;
+    draw_blur_elements(&mut frame, &overlay_blur, &overlay_blur_damage)?;
     draw_render_elements(&mut frame, 1.0, request.overlay_layer, request.damage)?;
     draw_optional_memory(&mut frame, request.loading.as_ref(), request.damage)?;
     draw_optional_memory(&mut frame, request.debug.as_ref(), request.damage)?;

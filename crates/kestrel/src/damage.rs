@@ -9,8 +9,10 @@ use smithay::{
         gles::GlesRenderer,
         utils::{CommitCounter, DamageSet, OpaqueRegions},
     },
+    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{Buffer, Physical, Rectangle, Scale, Size, Transform},
 };
+use std::collections::HashMap;
 
 type LayerSurfaceElement = LayerElement;
 type WindowSurfaceElement = WaylandSurfaceRenderElement<GlesRenderer>;
@@ -239,4 +241,88 @@ fn full_damage(output_size: Size<i32, Physical>) -> Rectangle<i32, Physical> {
 
 fn output_tracker(output_size: Size<i32, Physical>) -> OutputDamageTracker {
     OutputDamageTracker::new(output_size, 1.0, Transform::Normal)
+}
+
+#[derive(Debug, Default)]
+pub struct LayerGeometryTracker {
+    previous: HashMap<u32, Rectangle<i32, Physical>>,
+}
+
+impl LayerGeometryTracker {
+    pub fn geometry_changed(
+        &self,
+        output_size: Size<i32, Physical>,
+        surfaces: &[(WlSurface, Rectangle<i32, Physical>)],
+    ) -> bool {
+        let output = Rectangle::<i32, Physical>::from_size(output_size);
+        surfaces.iter().any(|(surface, rect)| {
+            self.previous
+                .get(&surface.id().protocol_id())
+                .is_some_and(|previous| {
+                    previous != rect
+                        && (previous.intersection(output).is_some()
+                            || rect.intersection(output).is_some())
+                })
+        })
+    }
+
+    pub fn expand_damage(
+        &mut self,
+        output_size: Size<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        surfaces: &[(WlSurface, Rectangle<i32, Physical>)],
+    ) -> (Vec<Rectangle<i32, Physical>>, bool) {
+        let output = Rectangle::<i32, Physical>::from_size(output_size);
+        let mut expanded = damage.to_vec();
+        let mut geometry_changed = false;
+        let mut active = std::collections::HashSet::new();
+
+        for (surface, rect) in surfaces {
+            let id = surface.id().protocol_id();
+            active.insert(id);
+            if let Some(previous) = self.previous.get(&id)
+                && previous != rect
+            {
+                geometry_changed = true;
+                if let Some(previous) = previous.intersection(output) {
+                    expanded.push(previous);
+                }
+                if let Some(current) = rect.intersection(output) {
+                    expanded.push(current);
+                }
+            }
+            self.previous.insert(id, *rect);
+        }
+
+        self.previous.retain(|id, _| active.contains(id));
+        (
+            merge_damage_rectangles(output, expanded),
+            geometry_changed,
+        )
+    }
+}
+
+pub(crate) fn merge_damage_rectangles(
+    output: Rectangle<i32, Physical>,
+    damage: Vec<Rectangle<i32, Physical>>,
+) -> Vec<Rectangle<i32, Physical>> {
+    let mut shaped: Vec<Rectangle<i32, Physical>> = Vec::new();
+    for rect in damage {
+        let Some(mut rect) = rect.intersection(output) else {
+            continue;
+        };
+        if rect.is_empty() {
+            continue;
+        }
+        let mut index = 0;
+        while index < shaped.len() {
+            if shaped[index].overlaps_or_touches(rect) {
+                rect = rect.merge(shaped.swap_remove(index));
+            } else {
+                index += 1;
+            }
+        }
+        shaped.push(rect);
+    }
+    shaped
 }

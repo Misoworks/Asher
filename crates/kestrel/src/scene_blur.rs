@@ -106,6 +106,7 @@ void main() {
 pub struct SceneBlurCache {
     entries: Vec<SceneBlurCacheEntry>,
     program: Option<GlesTexProgram>,
+    animating: bool,
 }
 
 impl SceneBlurCache {
@@ -114,11 +115,16 @@ impl SceneBlurCache {
     }
 
     pub fn retain_targets(&mut self, targets: &[LayerRenderTarget]) {
+        self.animating = false;
         for entry in &mut self.entries {
             if let Some(target) = targets
                 .iter()
                 .find(|target| target.size.w > 1 && target.size.h > 1 && entry.matches(target))
             {
+                if entry.location != target.location || entry.target_opacity != target.opacity {
+                    self.animating = true;
+                    entry.rect = Rectangle::<i32, Physical>::new((0, 0).into(), (0, 0).into());
+                }
                 entry.location = target.location;
                 entry.target_opacity = target.opacity;
             }
@@ -128,7 +134,7 @@ impl SceneBlurCache {
     }
 
     pub fn is_animating(&self) -> bool {
-        false
+        self.animating
     }
 
     pub fn has_cached_elements(&self) -> bool {

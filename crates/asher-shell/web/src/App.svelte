@@ -134,15 +134,15 @@
       return;
     }
     if (event.key === "Escape" && surface === "start-menu") {
-      sendAction({ type: "toggle-start-menu" });
+      sendAction({ type: "close-start-menu" });
       return;
     }
     if (event.key === "Escape" && surface === "quick-settings") {
-      sendAction({ type: "toggle-quick-settings" });
+      sendAction({ type: "close-quick-settings" });
       return;
     }
     if (event.key === "Escape" && surface === "date-center") {
-      sendAction({ type: "toggle-date-center" });
+      sendAction({ type: "close-date-center" });
       return;
     }
     if (event.key === "Escape") {
@@ -154,14 +154,14 @@
     if (!(event.target instanceof Element)) return;
     const target = event.target;
     if (surface === "start-menu" && !target.closest(".shell-start-menu")) {
-      sendAction({ type: "toggle-start-menu" });
+      sendAction({ type: "close-start-menu" });
       return;
     }
     if ((surface === "quick-settings" || surface === "date-center") && !target.closest(".popover")) {
       if (surface === "quick-settings") {
-        sendAction({ type: "toggle-quick-settings" });
+        sendAction({ type: "close-quick-settings" });
       } else {
-        sendAction({ type: "toggle-date-center" });
+        sendAction({ type: "close-date-center" });
       }
       return;
     }

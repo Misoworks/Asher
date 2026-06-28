@@ -9,6 +9,7 @@
 
   let { snapshot }: { snapshot: ShellSnapshot } = $props();
   let powerMenuOpen = $state(false);
+  let powerMenuNative = $state(false);
   const showNetwork = $derived(Boolean(snapshot.status.network));
   const showPower = $derived(Boolean(snapshot.status.battery));
   const showVolume = $derived(Boolean(snapshot.status.audio));
@@ -22,6 +23,7 @@
     const closePowerMenu = () => {
       void closeNativePopup();
       powerMenuOpen = false;
+      powerMenuNative = false;
     };
     window.addEventListener("fenestra:asher.surface-open", closePowerMenu);
     window.addEventListener("fenestra:asher.surface-close", closePowerMenu);
@@ -50,35 +52,46 @@
   }
 
   async function togglePowerMenu(event: MouseEvent) {
-    if (!canUseNativePopup()) {
-      console.warn("native popup protocol is unavailable in this Fenestra surface");
-      return;
-    }
     if (powerMenuOpen) {
       await closeNativePopup();
       powerMenuOpen = false;
+      powerMenuNative = false;
       return;
     }
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLElement)) {
+    if (canUseNativePopup()) {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      const width = 188;
+      const height = 172;
+      try {
+        await openNativePopup({
+          x: Math.round(rect.right - width),
+          y: Math.round(rect.bottom + 8),
+          width,
+          height,
+          html: sessionMenuDocument(),
+        });
+        powerMenuOpen = true;
+        powerMenuNative = true;
+      } catch (error) {
+        powerMenuOpen = true;
+        powerMenuNative = false;
+        console.error("failed to open native power popup", error);
+      }
       return;
     }
-    const rect = target.getBoundingClientRect();
-    const width = 188;
-    const height = 172;
-    try {
-      await openNativePopup({
-        x: Math.round(rect.right - width),
-        y: Math.round(rect.bottom + 8),
-        width,
-        height,
-        html: sessionMenuDocument(),
-      });
-      powerMenuOpen = true;
-    } catch (error) {
-      powerMenuOpen = false;
-      console.error("failed to open native power popup", error);
-    }
+    powerMenuOpen = true;
+    powerMenuNative = false;
+  }
+
+  function runSessionCommand(command: string) {
+    sendAction({ type: "session-command", command });
+    powerMenuOpen = false;
+    powerMenuNative = false;
+    void closeNativePopup();
   }
 
   function canUseNativePopup() {
@@ -263,6 +276,27 @@
       </button>
     </div>
   </header>
+
+  {#if powerMenuOpen && !powerMenuNative}
+    <menu class="session-actions-fallback">
+      <button type="button" onclick={() => runSessionCommand("lock")}>
+        <Icon name="lock" />
+        <span>Lock</span>
+      </button>
+      <button type="button" onclick={() => runSessionCommand("suspend")}>
+        <Icon name="moon" />
+        <span>Suspend</span>
+      </button>
+      <button type="button" onclick={() => runSessionCommand("reboot")}>
+        <Icon name="reboot" />
+        <span>Restart</span>
+      </button>
+      <button type="button" class="is-danger" onclick={() => runSessionCommand("power-off")}>
+        <Icon name="power" />
+        <span>Power Off</span>
+      </button>
+    </menu>
+  {/if}
 
   <div class="quick-status-grid">
     {#if showNetwork}

@@ -138,8 +138,11 @@ export type ShellAction =
   | { type: "open-launcher" }
   | { type: "launch-default-app"; app: "terminal" | "file-manager" | "browser" | "settings" }
   | { type: "toggle-start-menu" }
+  | { type: "close-start-menu" }
   | { type: "toggle-quick-settings" }
+  | { type: "close-quick-settings" }
   | { type: "toggle-date-center" }
+  | { type: "close-date-center" }
   | { type: "workspace-switch"; workspace: string }
   | { type: "workspace-relative"; offset: number }
   | { type: "workspace-new" }

@@ -4,7 +4,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point},
+    utils::{Logical, Physical, Point, Rectangle},
     wayland::{
         alpha_modifier::AlphaModifierSurfaceCachedState,
         compositor,
@@ -106,7 +106,36 @@ pub fn has_layer_above_windows(output: &Output, point: Point<f64, Logical>) -> b
         .any(|layer| pointer_focus_on_layer(output, point, layer).is_some())
 }
 
+const SHELL_CHROME_NAMESPACES: &[&str] = &["asher-panel", "asher-sidebar", "asher-dock"];
+
+pub fn layer_surface_rects(output: &Output) -> Vec<(WlSurface, Rectangle<i32, Physical>)> {
+    let layer_map = layer_map_for_output(output);
+    let mut rects = Vec::new();
+    for layer in [
+        Layer::Background,
+        Layer::Bottom,
+        Layer::Top,
+        Layer::Overlay,
+    ] {
+        for surface in layer_map.layers_on(layer) {
+            let Some(geometry) = layer_map.layer_geometry(surface) else {
+                continue;
+            };
+            let rect = Rectangle::<i32, Physical>::new(
+                (geometry.loc.x, geometry.loc.y).into(),
+                (geometry.size.w, geometry.size.h).into(),
+            );
+            rects.push((surface.wl_surface().clone(), rect));
+        }
+    }
+    rects
+}
+
 pub fn should_close_transient_popover(output: &Output, point: Point<f64, Logical>) -> bool {
+    if pointer_on_shell_chrome(output, point) {
+        return false;
+    }
+
     let layer_map = layer_map_for_output(output);
     let mut has_transient = false;
     for layer in [Layer::Overlay, Layer::Top] {
@@ -352,6 +381,23 @@ fn point_inside_layer_material(
     let (location, size) =
         material_geometry(surface.namespace(), geometry.loc, geometry.size, false);
     point_in_rect(point, location, size)
+}
+
+fn pointer_on_shell_chrome(output: &Output, point: Point<f64, Logical>) -> bool {
+    let layer_map = layer_map_for_output(output);
+    for layer in [Layer::Top, Layer::Bottom] {
+        for surface in layer_map.layers_on(layer) {
+            if !SHELL_CHROME_NAMESPACES.contains(&surface.namespace()) {
+                continue;
+            }
+            if surface_accepts_input(surface)
+                && point_inside_layer_or_popup(&layer_map, surface, point)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn point_inside_layer_or_popup(

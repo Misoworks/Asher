@@ -425,14 +425,7 @@ fn commands_match(left: &str, right: &str) -> bool {
 }
 
 fn asher_wayland_display() -> Option<std::ffi::OsString> {
-    if let Some(display) = env::var_os("ASHER_WAYLAND_DISPLAY") {
-        return Some(display);
-    }
-
-    env::var("XDG_CURRENT_DESKTOP")
-        .is_ok_and(|desktop| desktop.split(':').any(|entry| entry == "Asher"))
-        .then(|| env::var_os("WAYLAND_DISPLAY"))
-        .flatten()
+    env::var_os("ASHER_WAYLAND_DISPLAY").or_else(|| env::var_os("WAYLAND_DISPLAY"))
 }
 
 #[cfg(test)]

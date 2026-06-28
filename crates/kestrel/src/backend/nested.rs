@@ -6,8 +6,8 @@ use crate::{
     background_effect,
     client::ClientState,
     damage::{
-        DamageTracker, blur_damage_elements, damage_area, damage_elements,
-        expand_damage_for_blur_targets,
+        DamageTracker, LayerGeometryTracker, blur_damage_elements, damage_area, damage_elements,
+        expand_damage_for_blur_targets, merge_damage_rectangles,
     },
     debug_overlay::{DebugOverlayCache, DebugOverlayStats, render_debug_overlay},
     frame_clock::{FrameClock, send_surface_frame_tree},
@@ -98,6 +98,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
     let mut damage_tracker = DamageTracker::new(output.size);
     let mut blur_damage_tracker = DamageTracker::new(output.size);
     let mut submitted_damage = SubmittedDamageHistory::default();
+    let mut layer_geometry = LayerGeometryTracker::default();
     let mut clients = Vec::new();
     let session_started = Instant::now();
     let mut previous_frame_ms = 0.0f32;
@@ -248,9 +249,14 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
         let scene_dirty = state.take_scene_dirty();
         let debug_needs_render =
             state.config.compositor.debug_overlay && debug_overlay_cache.needs_refresh();
+        let layer_geometry_changed = layer_geometry.geometry_changed(
+            output.size,
+            &layers::layer_surface_rects(state.output()),
+        );
         let blur_animating = blur_cache.is_animating();
         let content_render_needed = force_full_damage
             || scene_dirty
+            || layer_geometry_changed
             || removed_windows
             || finished_window_closes
             || state.animations_active()
@@ -416,8 +422,35 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             } else {
                 damage_plan.rectangles.clone()
             };
+            let (damage, geometry_changed) = layer_geometry.expand_damage(
+                output.size,
+                &damage,
+                &layers::layer_surface_rects(state.output()),
+            );
+            let blur_damage = if blur_enabled {
+                expand_damage_for_blur_targets(
+                    output.size,
+                    &blur_damage_plan.rectangles,
+                    &damage_plan.rectangles,
+                    &[&window_effect_targets, &top_targets, &overlay_targets],
+                )
+            } else {
+                blur_damage_plan.rectangles.clone()
+            };
+            let blur_damage = merge_damage_rectangles(
+                Rectangle::<i32, Physical>::from_size(output.size),
+                blur_damage
+                    .into_iter()
+                    .chain(damage.iter().copied())
+                    .collect(),
+            );
+            let force_geometry_damage = geometry_changed || blur_animating;
             let damage = submitted_damage.accumulate(output.size, &damage, buffer_age);
-            let blur_damage = blur_damage_plan.rectangles.clone();
+            let blur_damage = if force_geometry_damage && blur_enabled {
+                vec![Rectangle::<i32, Physical>::from_size(output.size)]
+            } else {
+                submitted_damage.accumulate(output.size, &blur_damage, buffer_age)
+            };
             previous_damage_area = damage_area(&damage);
             if !damage.is_empty() {
                 submit_damage = damage.clone();
