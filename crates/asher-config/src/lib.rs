@@ -106,7 +106,7 @@ impl Default for CompositorConfig {
             backend: BackendPreference::Auto,
             xwayland: true,
             debug_overlay: false,
-            background_image: Some(PathBuf::from("/home/kristof/Pictures/bg.jpg")),
+            background_image: None,
         }
     }
 }
@@ -206,7 +206,6 @@ impl Default for RecoveryConfig {
 #[serde(default)]
 pub struct PerformanceConfig {
     pub mode: PerformanceMode,
-    pub blur_quality: BlurQuality,
     pub animations: bool,
     pub reduce_effects_on_battery: bool,
 }
@@ -215,7 +214,6 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             mode: PerformanceMode::Balanced,
-            blur_quality: BlurQuality::Balanced,
             animations: true,
             reduce_effects_on_battery: false,
         }

@@ -6,10 +6,8 @@ use super::{
 use crate::{
     background::Background,
     background_effect,
-    damage::{
-        DamageTracker, LayerGeometryTracker, blur_damage_elements, damage_area, damage_elements,
-        expand_damage_for_blur_targets, merge_damage_rectangles,
-    },
+    compositor_damage::{CompositorDamageContext, CompositorDamagePlan, plan_compositor_damage},
+    damage::{DamageTracker, LayerGeometryTracker},
     debug_overlay::{DebugOverlayCache, DebugOverlayStats, render_debug_overlay},
     frame_clock::FrameClock,
     frame_clock::FrameTime,
@@ -88,6 +86,7 @@ pub struct SessionFrameRenderer {
     previous_frame_direct: bool,
     submitted_damage: SubmittedDamageHistory,
     layer_geometry: LayerGeometryTracker,
+    last_blur_passes: usize,
 }
 
 impl SessionFrameRenderer {
@@ -109,6 +108,7 @@ impl SessionFrameRenderer {
             previous_frame_direct: false,
             submitted_damage: SubmittedDamageHistory::default(),
             layer_geometry: LayerGeometryTracker::default(),
+            last_blur_passes: 0,
         }
     }
 
@@ -235,6 +235,11 @@ impl SessionFrameRenderer {
         } else {
             None
         };
+        self.last_blur_passes = if blur_enabled {
+            window_effect_targets.len() + top_targets.len() + overlay_targets.len()
+        } else {
+            0
+        };
         if can_direct_scanout(
             state,
             fullscreen_active,
@@ -267,87 +272,40 @@ impl SessionFrameRenderer {
             DrmError::Unsupported(format!("failed to bind GBM buffer: {error}"))
         })?;
         let debug_overlay = self.debug_overlay(state, renderer, content_render_needed)?;
-        let damage_plan = {
-            let damage_elements = damage_elements(
-                background_element.as_ref(),
-                &background_layer,
-                &bottom_layer,
-                &windows,
-                &window_chrome,
-                &top_layer,
-                &overlay_layer,
-                loading_overlay.as_ref(),
-                debug_overlay.as_ref(),
-            );
-            self.damage_tracker.plan(
-                state.output_size(),
-                usize::from(buffer_age),
-                force_full_damage || blur_animating || self.previous_frame_direct,
-                &damage_elements,
-            )
-        };
-        let blur_damage_plan = {
-            let blur_damage_elements = blur_damage_elements(
-                background_element.as_ref(),
-                &background_layer,
-                &bottom_layer,
-                &windows,
-            );
-            self.blur_damage_tracker.plan(
-                state.output_size(),
-                usize::from(buffer_age),
-                force_full_damage || blur_animating || self.previous_frame_direct,
-                &blur_damage_elements,
-            )
-        };
-        let damage = if blur_enabled {
-            expand_damage_for_blur_targets(
-                state.output_size(),
-                &damage_plan.rectangles,
-                &blur_damage_plan.rectangles,
-                &[&window_effect_targets, &top_targets, &overlay_targets],
-            )
-        } else {
-            damage_plan.rectangles.clone()
-        };
-        let (damage, geometry_changed) = self.layer_geometry.expand_damage(
-            state.output_size(),
-            &damage,
-            &layers::layer_surface_rects(state.output()),
+        let CompositorDamagePlan {
+            damage,
+            blur_damage,
+            damage_area: planned_damage_area,
+            ..
+        } = plan_compositor_damage(
+            CompositorDamageContext {
+                output_size: state.output_size(),
+                output: state.output(),
+                buffer_age: usize::from(buffer_age),
+                force_full_damage: force_full_damage
+                    || blur_animating
+                    || self.previous_frame_direct,
+                blur_enabled,
+                blur_animating,
+                window_effect_targets: &window_effect_targets,
+                top_targets: &top_targets,
+                overlay_targets: &overlay_targets,
+                background: background_element.as_ref(),
+                background_layer: &background_layer,
+                bottom_layer: &bottom_layer,
+                windows: &windows,
+                window_chrome: &window_chrome,
+                top_layer: &top_layer,
+                overlay_layer: &overlay_layer,
+                loading: loading_overlay.as_ref(),
+                debug: debug_overlay.as_ref(),
+            },
+            &mut self.damage_tracker,
+            &mut self.blur_damage_tracker,
+            &mut self.layer_geometry,
+            &self.submitted_damage,
         );
-        let blur_damage = if blur_enabled {
-            expand_damage_for_blur_targets(
-                state.output_size(),
-                &blur_damage_plan.rectangles,
-                &damage_plan.rectangles,
-                &[&window_effect_targets, &top_targets, &overlay_targets],
-            )
-        } else {
-            blur_damage_plan.rectangles.clone()
-        };
-        let blur_damage = merge_damage_rectangles(
-            Rectangle::<i32, Physical>::from_size(state.output_size()),
-            blur_damage
-                .into_iter()
-                .chain(damage.iter().copied())
-                .collect(),
-        );
-        let force_geometry_damage = geometry_changed || blur_animating;
-        let damage = self.submitted_damage.accumulate(
-            state.output_size(),
-            &damage,
-            usize::from(buffer_age),
-        );
-        let blur_damage = if force_geometry_damage && blur_enabled {
-            vec![Rectangle::<i32, Physical>::from_size(state.output_size())]
-        } else {
-            self.submitted_damage.accumulate(
-                state.output_size(),
-                &blur_damage,
-                usize::from(buffer_age),
-            )
-        };
-        self.previous_damage_area = damage_area(&damage);
+        self.previous_damage_area = planned_damage_area;
 
         if !damage.is_empty() {
             let output_size = state.output_size();
@@ -453,7 +411,7 @@ impl SessionFrameRenderer {
                 ),
                 damage_area: self.previous_damage_area,
                 surfaces: state.windows.surfaces().len() + state.layer_surfaces().len(),
-                blur_passes: 0,
+                blur_passes: self.last_blur_passes,
                 workspace,
                 profile,
                 xwayland,

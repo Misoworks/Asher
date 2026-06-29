@@ -148,6 +148,7 @@ fn render_staged_scene(
     framebuffer: &mut GlesTarget<'_>,
     request: SceneRenderRequest<'_>,
 ) -> Result<(), GlesError> {
+    let blur_quality = request.state.config.effects.blur_quality;
     {
         let mut frame =
             renderer.render(framebuffer, request.output_size, request.target_transform)?;
@@ -194,6 +195,7 @@ fn render_staged_scene(
             &targets,
             request.blur_damage,
             request.blur_enabled,
+            blur_quality,
         )?;
         let mut frame =
             renderer.render(framebuffer, request.output_size, request.target_transform)?;
@@ -222,6 +224,7 @@ fn render_staged_scene(
         request.top_targets,
         request.blur_damage,
         request.blur_enabled,
+        blur_quality,
     )?;
     {
         let mut frame =
@@ -241,6 +244,7 @@ fn render_staged_scene(
         request.overlay_targets,
         request.blur_damage,
         request.blur_enabled,
+        blur_quality,
     )?;
     let mut frame = renderer.render(framebuffer, request.output_size, request.target_transform)?;
     let blur_damage = blur_target_damage(request.output_size, request.overlay_targets);

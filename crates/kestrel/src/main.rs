@@ -3,6 +3,7 @@ mod background;
 mod background_effect;
 mod blur_material;
 mod client;
+mod compositor_damage;
 mod cursor;
 mod damage;
 mod debug_overlay;

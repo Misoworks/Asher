@@ -2,6 +2,7 @@ use crate::{
     layers::{BlurLayer, LayerMaterial, LayerRenderTarget},
     window_clip::RoundedWindowElement,
 };
+use asher_config::BlurQuality;
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -215,6 +216,7 @@ impl SceneBlurCache {
         target: &LayerRenderTarget,
         rect: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
+        quality: BlurQuality,
     ) -> Result<(&SceneBlurCacheEntry, f32), GlesError> {
         let now = Instant::now();
         let cached = self.entries.iter().position(|entry| entry.matches(target));
@@ -231,8 +233,8 @@ impl SceneBlurCache {
 
         let program = self.program(renderer)?;
         let sample_rect = padded_target_rect(output_size, target, rect);
-        let capture_size = blur_texture_size(target, sample_rect.size);
-        let texture_size = blur_texture_size(target, rect.size);
+        let capture_size = blur_texture_size(target, sample_rect.size, quality);
+        let texture_size = blur_texture_size(target, rect.size, quality);
         let source = source_rect_for_visible_target(sample_rect, rect, capture_size);
         let (capture, scratch, blurred) = match cached {
             Some(index)
@@ -368,6 +370,7 @@ pub fn capture_blur_elements(
     targets: &[LayerRenderTarget],
     damage: &[Rectangle<i32, Physical>],
     enabled: bool,
+    quality: BlurQuality,
 ) -> Result<Vec<BlurElement>, GlesError> {
     if !enabled {
         return Ok(Vec::new());
@@ -386,6 +389,7 @@ pub fn capture_blur_elements(
             target,
             rect,
             damage,
+            quality,
         )?;
         elements.push(render_element(renderer, rect, entry, opacity));
     }
@@ -688,26 +692,36 @@ fn clipped_rect(
         .intersection(output)
 }
 
-fn blur_texture_size(target: &LayerRenderTarget, size: Size<i32, Physical>) -> Size<i32, Physical> {
-    let scale = blur_downscale(target, size.w, size.h);
+fn blur_texture_size(
+    target: &LayerRenderTarget,
+    size: Size<i32, Physical>,
+    quality: BlurQuality,
+) -> Size<i32, Physical> {
+    let scale = blur_downscale(target, size.w, size.h, quality);
     Size::<i32, Physical>::from((
         div_ceil(size.w, scale).max(1),
         div_ceil(size.h, scale).max(1),
     ))
 }
 
-fn blur_downscale(target: &LayerRenderTarget, width: i32, height: i32) -> i32 {
-    if target.blur_layer != BlurLayer::Window {
-        return 3;
-    }
-
-    let area = width.saturating_mul(height);
-    if area >= 420_000 {
-        12
-    } else if area >= 120_000 {
-        10
+fn blur_downscale(target: &LayerRenderTarget, width: i32, height: i32, quality: BlurQuality) -> i32 {
+    let base: i32 = if target.blur_layer != BlurLayer::Window {
+        3
     } else {
-        7
+        let area = width.saturating_mul(height);
+        if area >= 420_000 {
+            12
+        } else if area >= 120_000 {
+            10
+        } else {
+            7
+        }
+    };
+
+    match quality {
+        BlurQuality::Quality => base.saturating_sub(2).max(2),
+        BlurQuality::Balanced => base,
+        BlurQuality::Performance => base.saturating_add(3),
     }
 }
 
