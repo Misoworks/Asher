@@ -20,7 +20,10 @@
     type="button"
     class="clock-button"
     aria-label={`${snapshot.date} ${snapshot.time}`}
-    onclick={() => sendAction({ type: "toggle-date-center" })}
+    onclick={() =>
+      sendAction({
+        type: snapshot.dateCenterOpen ? "close-date-center" : "toggle-date-center",
+      })}
   >
     {snapshot.time}
   </button>

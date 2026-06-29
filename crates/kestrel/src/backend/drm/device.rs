@@ -27,7 +27,7 @@ use smithay::{
         rustix::fs::stat,
         wayland_server::DisplayHandle,
     },
-    utils::{DeviceFd, Physical, Raw, Size},
+    utils::{DeviceFd, Physical, Raw, Size, Transform},
 };
 use tracing::{debug, info};
 
@@ -458,6 +458,7 @@ impl ConnectedOutput {
                 refresh_millihertz: i32::try_from(mode.vrefresh().saturating_mul(1000))
                     .unwrap_or(crate::output::DEFAULT_REFRESH_MILLIHERTZ),
                 scale: 1.0,
+                transform: Transform::Normal,
             },
             connector,
             mode,

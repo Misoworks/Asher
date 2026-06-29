@@ -19,6 +19,7 @@ pub struct OutputDescriptor {
     pub size: Size<i32, Physical>,
     pub refresh_millihertz: i32,
     pub scale: f64,
+    pub transform: Transform,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +50,7 @@ impl NestedOutput {
             size: self.size,
             refresh_millihertz: self.refresh_millihertz,
             scale: 1.0,
+            transform: Transform::Flipped180,
         }
     }
 
@@ -84,11 +86,13 @@ pub fn create_output(display: &DisplayHandle, descriptor: &OutputDescriptor) -> 
     );
 
     output.create_global::<KestrelState>(display);
-    configure_output(
+    configure_output_at(
         &output,
         descriptor.size,
         descriptor.refresh_millihertz,
         descriptor.scale,
+        (0, 0).into(),
+        descriptor.transform,
     );
     output
 }
@@ -99,7 +103,7 @@ pub fn configure_output(
     refresh_millihertz: i32,
     scale: f64,
 ) {
-    configure_output_at(output, size, refresh_millihertz, scale, (0, 0).into());
+    configure_output_at(output, size, refresh_millihertz, scale, (0, 0).into(), Transform::Normal);
 }
 
 pub fn configure_output_at(
@@ -108,6 +112,7 @@ pub fn configure_output_at(
     refresh_millihertz: i32,
     scale: f64,
     location: Point<i32, Logical>,
+    transform: Transform,
 ) {
     let mode = Mode {
         size: normalized_size(size),
@@ -116,7 +121,7 @@ pub fn configure_output_at(
 
     output.change_current_state(
         Some(mode),
-        Some(Transform::Normal),
+        Some(transform),
         Some(output_scale(scale)),
         Some(location),
     );

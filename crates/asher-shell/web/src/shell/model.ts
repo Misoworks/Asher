@@ -37,6 +37,9 @@ export type ShellSnapshot = {
   doNotDisturb: boolean;
   notifications: NotificationItem[];
   toastNotifications: NotificationItem[];
+  startMenuOpen: boolean;
+  quickSettingsOpen: boolean;
+  dateCenterOpen: boolean;
 };
 
 export type ShellPalette = {
@@ -222,5 +225,8 @@ export const emptySnapshot = (): ShellSnapshot => {
     doNotDisturb: false,
     notifications: [],
     toastNotifications: [],
+    startMenuOpen: false,
+    quickSettingsOpen: false,
+    dateCenterOpen: false,
   };
 };

@@ -38,7 +38,7 @@ use smithay::{
         wayland_server::{Display, ListeningSocket},
         winit::platform::pump_events::PumpStatus,
     },
-    utils::{Physical, Rectangle, Transform},
+    utils::{Physical, Rectangle},
     wayland::shell::wlr_layer::Layer,
 };
 use std::{
@@ -93,8 +93,8 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
     let mut frame_interval = refresh_interval(output.refresh_millihertz);
     let mut frame_clock = FrameClock::new(frame_interval);
     let mut last_refresh_check = Instant::now() - REFRESH_CHECK_INTERVAL;
-    let mut damage_tracker = DamageTracker::new(output.size);
-    let mut blur_damage_tracker = DamageTracker::new(output.size);
+    let mut damage_tracker = DamageTracker::from_output(state.output());
+    let mut blur_damage_tracker = DamageTracker::from_output(state.output());
     let mut submitted_damage = SubmittedDamageHistory::default();
     let mut layer_geometry = LayerGeometryTracker::default();
     let mut clients = Vec::new();
@@ -144,6 +144,8 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
             WinitEvent::Resized { size, .. } => {
                 if output.resize(size) {
                     state.set_output_size(output.size);
+                    damage_tracker = DamageTracker::from_output(state.output());
+                    blur_damage_tracker = DamageTracker::from_output(state.output());
                     submitted_damage.clear();
                     force_full_damage = true;
                 }
@@ -162,6 +164,8 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
 
         if output.resize(backend.window_size()) {
             state.set_output_size(output.size);
+            damage_tracker = DamageTracker::from_output(state.output());
+            blur_damage_tracker = DamageTracker::from_output(state.output());
             submitted_damage.clear();
             force_full_damage = true;
         }
@@ -418,7 +422,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
                     SceneRenderRequest {
                         state: &state,
                         output_size: output.size,
-                        target_transform: Transform::Normal,
+                        target_transform: state.output_transform(),
                         damage: &damage,
                         blur_damage: &blur_damage,
                         blur_enabled,

@@ -22,6 +22,7 @@ type WindowElement = RoundedWindowElement<WindowSurfaceElement>;
 #[derive(Debug)]
 pub struct DamageTracker {
     output_size: Size<i32, Physical>,
+    transform: Transform,
     tracker: OutputDamageTracker,
 }
 
@@ -31,10 +32,23 @@ pub struct DamagePlan {
 }
 
 impl DamageTracker {
-    pub fn new(output_size: Size<i32, Physical>) -> Self {
+    pub fn new(output_size: Size<i32, Physical>, transform: Transform) -> Self {
         Self {
             output_size,
-            tracker: output_tracker(output_size),
+            transform,
+            tracker: output_tracker(output_size, transform),
+        }
+    }
+
+    pub fn from_output(output: &smithay::output::Output) -> Self {
+        let output_size = output
+            .current_mode()
+            .map(|mode| mode.size)
+            .unwrap_or_default();
+        Self {
+            output_size,
+            transform: output.current_transform(),
+            tracker: OutputDamageTracker::from_output(output),
         }
     }
 
@@ -47,7 +61,7 @@ impl DamageTracker {
     ) -> DamagePlan {
         if self.output_size != output_size {
             self.output_size = output_size;
-            self.tracker = output_tracker(output_size);
+            self.tracker = output_tracker(output_size, self.transform);
         }
 
         let rectangles = self
@@ -239,8 +253,11 @@ fn full_damage(output_size: Size<i32, Physical>) -> Rectangle<i32, Physical> {
     Rectangle::from_size(output_size)
 }
 
-fn output_tracker(output_size: Size<i32, Physical>) -> OutputDamageTracker {
-    OutputDamageTracker::new(output_size, 1.0, Transform::Normal)
+fn output_tracker(
+    output_size: Size<i32, Physical>,
+    transform: Transform,
+) -> OutputDamageTracker {
+    OutputDamageTracker::new(output_size, 1.0, transform)
 }
 
 #[derive(Debug, Default)]

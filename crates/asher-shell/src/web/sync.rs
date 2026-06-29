@@ -121,6 +121,9 @@ impl WebShell {
             self.palette,
             &self.config,
             self.config.general.safe_mode,
+            self.start_menu_visible,
+            self.quick_visible,
+            self.date_visible,
         );
         let Ok(json) = serde_json::to_string(&snapshot) else {
             return;

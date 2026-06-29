@@ -25,6 +25,10 @@ impl KestrelState {
         self.outputs.primary_scale()
     }
 
+    pub fn output_transform(&self) -> smithay::utils::Transform {
+        self.outputs.primary_transform()
+    }
+
     #[cfg(feature = "session-backend")]
     pub fn set_output_descriptors(&mut self, descriptors: Vec<crate::output::OutputDescriptor>) {
         self.outputs

@@ -46,6 +46,9 @@ pub struct WebShellSnapshot {
     pub do_not_disturb: bool,
     pub notifications: Vec<WebNotification>,
     pub toast_notifications: Vec<WebNotification>,
+    pub start_menu_open: bool,
+    pub quick_settings_open: bool,
+    pub date_center_open: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -249,6 +252,9 @@ impl WebShellSnapshot {
         palette: ShellPalette,
         config: &AsherConfig,
         safe_mode: bool,
+        start_menu_open: bool,
+        quick_settings_open: bool,
+        date_center_open: bool,
     ) -> Self {
         let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
         let windows: Vec<WebWindow> = model.windows.iter().map(WebWindow::from).collect();
@@ -383,6 +389,9 @@ impl WebShellSnapshot {
                 .iter()
                 .map(WebNotification::from)
                 .collect(),
+            start_menu_open,
+            quick_settings_open,
+            date_center_open,
         }
     }
 }

@@ -95,6 +95,10 @@ impl OutputGraph {
         self.primary().output.current_scale().fractional_scale()
     }
 
+    pub fn primary_transform(&self) -> smithay::utils::Transform {
+        self.primary().descriptor.transform
+    }
+
     pub fn contains(&self, name: &str) -> bool {
         self.outputs.contains_key(name)
     }
@@ -255,5 +259,6 @@ fn configure_managed_output(output: &ManagedOutput) {
         output.descriptor.refresh_millihertz,
         output.descriptor.scale,
         output.location,
+        output.descriptor.transform,
     );
 }

@@ -27,14 +27,25 @@
     <button type="button" class="sidebar-action" aria-label="Open launcher" onclick={() => sendAction({ type: "open-launcher" })}>
       <Icon name="search" />
     </button>
-    <button type="button" class="sidebar-action" aria-label="Open Start menu" onclick={() => sendAction({ type: "toggle-start-menu" })}>
+    <button
+      type="button"
+      class="sidebar-action"
+      aria-label="Open Start menu"
+      onclick={() =>
+        sendAction({
+          type: snapshot.startMenuOpen ? "close-start-menu" : "toggle-start-menu",
+        })}
+    >
       <Icon name="menu" />
     </button>
     <button
       type="button"
       class="sidebar-action"
       aria-label="Quick settings"
-      onclick={() => sendAction({ type: "toggle-quick-settings" })}
+      onclick={() =>
+        sendAction({
+          type: snapshot.quickSettingsOpen ? "close-quick-settings" : "toggle-quick-settings",
+        })}
     >
       <Icon name="settings" />
     </button>

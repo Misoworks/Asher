@@ -87,7 +87,15 @@
 <section class="shell-taskbar" onwheel={workspaceScroll}>
   <nav class="taskbar-apps" aria-label="Pinned applications">
     {#if snapshot.appearance.taskbarLauncher}
-      <button type="button" class="taskbar-launcher" aria-label="Open Start menu" onclick={() => sendAction({ type: "toggle-start-menu" })}>
+      <button
+        type="button"
+        class="taskbar-launcher"
+        aria-label="Open Start menu"
+        onclick={() =>
+          sendAction({
+            type: snapshot.startMenuOpen ? "close-start-menu" : "toggle-start-menu",
+          })}
+      >
         <svg class="asher-mark" width="31" height="32" viewBox="0 0 31 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
             class="asher-mark-secondary"
@@ -123,7 +131,10 @@
     type="button"
     class="taskbar-clock"
     aria-label={`${snapshot.date} ${snapshot.time}`}
-    onclick={() => sendAction({ type: "toggle-date-center" })}
+    onclick={() =>
+      sendAction({
+        type: snapshot.dateCenterOpen ? "close-date-center" : "toggle-date-center",
+      })}
   >
     <span>{snapshot.time}</span>
     <strong>{shortDate()}</strong>

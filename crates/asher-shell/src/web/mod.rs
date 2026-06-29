@@ -118,12 +118,12 @@ pub(super) struct WebShell {
 
 impl WebShell {
     fn tick_actions(&mut self) {
-        self.handle_control_requests();
         let mut handled_action = false;
         while let Ok(action) = self.actions_rx.try_recv() {
             handled_action = true;
             self.handle_action(action);
         }
+        self.handle_control_requests();
 
         if handled_action || self.start_menu_visible {
             self.sync_chrome();

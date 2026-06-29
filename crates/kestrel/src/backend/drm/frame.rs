@@ -94,8 +94,8 @@ impl SessionFrameRenderer {
         Self {
             background: Background::new(state.config.compositor.background_image.clone()),
             frame_clock: FrameClock::new(frame_interval),
-            damage_tracker: DamageTracker::new(state.output_size()),
-            blur_damage_tracker: DamageTracker::new(state.output_size()),
+            damage_tracker: DamageTracker::new(state.output_size(), Transform::Normal),
+            blur_damage_tracker: DamageTracker::new(state.output_size(), Transform::Normal),
             blur_cache: SceneBlurCache::default(),
             debug_overlay_cache: DebugOverlayCache::default(),
             session_started: Instant::now(),
@@ -362,8 +362,8 @@ impl SessionFrameRenderer {
     pub fn reset_for_output(&mut self, state: &KestrelState) {
         let frame_interval = refresh_interval(state.output_refresh_millihertz());
         self.frame_clock.set_refresh(frame_interval);
-        self.damage_tracker = DamageTracker::new(state.output_size());
-        self.blur_damage_tracker = DamageTracker::new(state.output_size());
+        self.damage_tracker = DamageTracker::new(state.output_size(), Transform::Normal);
+        self.blur_damage_tracker = DamageTracker::new(state.output_size(), Transform::Normal);
         self.blur_cache.clear();
         self.debug_overlay_cache.clear();
         self.submitted_damage.clear();

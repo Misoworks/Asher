@@ -37,6 +37,9 @@ impl WebShell {
             palette,
             &config,
             config.general.safe_mode,
+            false,
+            false,
+            false,
         );
         let mut surfaces = WebSurfaces::new(
             actions_tx,

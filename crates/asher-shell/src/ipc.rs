@@ -1,8 +1,15 @@
 use asher_ipc::{
-    IpcRequest, IpcResponse, ProfileSummary, WindowSummary, WorkspaceSummary, send_request,
+    IpcRequest, IpcResponse, ProfileSummary, StatusPayload, WindowSummary, WorkspaceSummary,
+    send_request,
 };
 use asher_layout::{ModeId, ProfileId, WindowId, WorkspaceId};
-use std::{error::Error, io};
+use std::{
+    error::Error,
+    io,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
+static SHELL_SNAPSHOT_SUPPORTED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone)]
 pub struct ShellModel {
@@ -18,26 +25,72 @@ pub struct ShellModel {
 }
 
 pub fn load_model() -> Result<ShellModel, Box<dyn Error>> {
-    match send_request(&IpcRequest::ShellSnapshot)? {
-        IpcResponse::ShellSnapshot {
-            status,
-            workspaces,
-            profiles,
-            windows,
-        } => Ok(ShellModel {
-            active_workspace: status.active_workspace,
-            active_profile: status.active_profile,
-            active_mode: status.active_mode,
-            xwayland_display: status.xwayland_display,
-            blur_enabled: status.blur_enabled,
-            debug_overlay: status.debug_overlay,
-            workspaces,
-            profiles,
-            windows,
-        }),
-        IpcResponse::Error { message } => Err(message.into()),
-        response => Err(unexpected_response(response).into()),
+    if SHELL_SNAPSHOT_SUPPORTED.load(Ordering::Relaxed) {
+        match send_request(&IpcRequest::ShellSnapshot)? {
+            IpcResponse::ShellSnapshot {
+                status,
+                workspaces,
+                profiles,
+                windows,
+            } => Ok(shell_model_from_parts(status, workspaces, profiles, windows)),
+            IpcResponse::Error { message } if shell_snapshot_unsupported(&message) => {
+                SHELL_SNAPSHOT_SUPPORTED.store(false, Ordering::Relaxed);
+                load_model_legacy()
+            }
+            IpcResponse::Error { message } => Err(message.into()),
+            response => Err(unexpected_response(response).into()),
+        }
+    } else {
+        load_model_legacy()
     }
+}
+
+fn load_model_legacy() -> Result<ShellModel, Box<dyn Error>> {
+    let status = match send_request(&IpcRequest::Status)? {
+        IpcResponse::Status(status) => status,
+        IpcResponse::Error { message } => return Err(message.into()),
+        response => return Err(unexpected_response(response).into()),
+    };
+    let workspaces = match send_request(&IpcRequest::ListWorkspaces)? {
+        IpcResponse::Workspaces { workspaces } => workspaces,
+        IpcResponse::Error { message } => return Err(message.into()),
+        response => return Err(unexpected_response(response).into()),
+    };
+    let profiles = match send_request(&IpcRequest::ListProfiles)? {
+        IpcResponse::Profiles { profiles } => profiles,
+        IpcResponse::Error { message } => return Err(message.into()),
+        response => return Err(unexpected_response(response).into()),
+    };
+    let windows = match send_request(&IpcRequest::ListWindows)? {
+        IpcResponse::Windows { windows } => windows,
+        IpcResponse::Error { message } => return Err(message.into()),
+        response => return Err(unexpected_response(response).into()),
+    };
+
+    Ok(shell_model_from_parts(status, workspaces, profiles, windows))
+}
+
+fn shell_model_from_parts(
+    status: StatusPayload,
+    workspaces: Vec<WorkspaceSummary>,
+    profiles: Vec<ProfileSummary>,
+    windows: Vec<WindowSummary>,
+) -> ShellModel {
+    ShellModel {
+        active_workspace: status.active_workspace,
+        active_profile: status.active_profile,
+        active_mode: status.active_mode,
+        xwayland_display: status.xwayland_display,
+        blur_enabled: status.blur_enabled,
+        debug_overlay: status.debug_overlay,
+        workspaces,
+        profiles,
+        windows,
+    }
+}
+
+fn shell_snapshot_unsupported(message: &str) -> bool {
+    message.contains("shell-snapshot") || message.contains("unknown variant")
 }
 
 pub fn switch_workspace(workspace: WorkspaceId) -> Result<ShellModel, Box<dyn Error>> {
@@ -110,4 +163,15 @@ fn unexpected_response(response: IpcResponse) -> io::Error {
         io::ErrorKind::InvalidData,
         format!("unexpected ipc response: {response:?}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_snapshot_unsupported;
+
+    #[test]
+    fn detects_unsupported_shell_snapshot_errors() {
+        let message = "unknown variant `shell-snapshot`, expected one of `status`";
+        assert!(shell_snapshot_unsupported(message));
+    }
 }
