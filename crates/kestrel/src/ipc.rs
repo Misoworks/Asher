@@ -104,6 +104,12 @@ fn handle_request(
 ) -> IpcResult {
     match request {
         IpcRequest::Status => IpcResult::read_only(IpcResponse::Status(status_payload(state))),
+        IpcRequest::ShellSnapshot => IpcResult::read_only(IpcResponse::ShellSnapshot {
+            status: status_payload(state),
+            workspaces: workspace_summaries(state),
+            profiles: profile_summaries(state),
+            windows: window_summaries(state),
+        }),
         IpcRequest::ListWorkspaces => IpcResult::read_only(IpcResponse::Workspaces {
             workspaces: workspace_summaries(state),
         }),

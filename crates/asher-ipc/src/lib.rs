@@ -89,6 +89,7 @@ fn json_error(error: serde_json::Error) -> io::Error {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum IpcRequest {
     Status,
+    ShellSnapshot,
     Reload,
     ListProfiles,
     ListWorkspaces,
@@ -159,6 +160,12 @@ pub enum DefaultAppKind {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum IpcResponse {
     Status(StatusPayload),
+    ShellSnapshot {
+        status: StatusPayload,
+        workspaces: Vec<WorkspaceSummary>,
+        profiles: Vec<ProfileSummary>,
+        windows: Vec<WindowSummary>,
+    },
     Profiles { profiles: Vec<ProfileSummary> },
     Workspaces { workspaces: Vec<WorkspaceSummary> },
     Windows { windows: Vec<WindowSummary> },

@@ -18,38 +18,26 @@ pub struct ShellModel {
 }
 
 pub fn load_model() -> Result<ShellModel, Box<dyn Error>> {
-    let status = match send_request(&IpcRequest::Status)? {
-        IpcResponse::Status(status) => status,
-        IpcResponse::Error { message } => return Err(message.into()),
-        response => return Err(unexpected_response(response).into()),
-    };
-    let workspaces = match send_request(&IpcRequest::ListWorkspaces)? {
-        IpcResponse::Workspaces { workspaces } => workspaces,
-        IpcResponse::Error { message } => return Err(message.into()),
-        response => return Err(unexpected_response(response).into()),
-    };
-    let profiles = match send_request(&IpcRequest::ListProfiles)? {
-        IpcResponse::Profiles { profiles } => profiles,
-        IpcResponse::Error { message } => return Err(message.into()),
-        response => return Err(unexpected_response(response).into()),
-    };
-    let windows = match send_request(&IpcRequest::ListWindows)? {
-        IpcResponse::Windows { windows } => windows,
-        IpcResponse::Error { message } => return Err(message.into()),
-        response => return Err(unexpected_response(response).into()),
-    };
-
-    Ok(ShellModel {
-        active_workspace: status.active_workspace,
-        active_profile: status.active_profile,
-        active_mode: status.active_mode,
-        xwayland_display: status.xwayland_display,
-        blur_enabled: status.blur_enabled,
-        debug_overlay: status.debug_overlay,
-        workspaces,
-        profiles,
-        windows,
-    })
+    match send_request(&IpcRequest::ShellSnapshot)? {
+        IpcResponse::ShellSnapshot {
+            status,
+            workspaces,
+            profiles,
+            windows,
+        } => Ok(ShellModel {
+            active_workspace: status.active_workspace,
+            active_profile: status.active_profile,
+            active_mode: status.active_mode,
+            xwayland_display: status.xwayland_display,
+            blur_enabled: status.blur_enabled,
+            debug_overlay: status.debug_overlay,
+            workspaces,
+            profiles,
+            windows,
+        }),
+        IpcResponse::Error { message } => Err(message.into()),
+        response => Err(unexpected_response(response).into()),
+    }
 }
 
 pub fn switch_workspace(workspace: WorkspaceId) -> Result<ShellModel, Box<dyn Error>> {
