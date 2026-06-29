@@ -2,7 +2,6 @@ use std::{
     env,
     fs,
     path::{Path, PathBuf},
-    process::Command,
     time::SystemTime,
 };
 
@@ -31,26 +30,10 @@ fn main() {
         workspace_root.join("crates/asher-ipc/src"),
     ];
 
-    if !needs_rebuild(&kestrel, &watch_paths) && !needs_rebuild(&shell, &watch_paths) {
-        return;
-    }
-
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(cargo);
-    command
-        .current_dir(&workspace_root)
-        .arg("build")
-        .args(["-p", "kestrel", "-p", "asher-shell"]);
-
-    if profile == "release" {
-        command.arg("--release");
-    }
-
-    let status = command
-        .status()
-        .expect("failed to build kestrel and asher-shell for asher-session");
-    if !status.success() {
-        panic!("failed to build kestrel and asher-shell for asher-session");
+    if needs_rebuild(&kestrel, &watch_paths) || needs_rebuild(&shell, &watch_paths) {
+        println!(
+            "cargo:warning=kestrel/asher-shell may be stale; build them with `cargo build -p kestrel -p asher-shell` before running asher-session"
+        );
     }
 }
 
