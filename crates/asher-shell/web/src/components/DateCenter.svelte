@@ -174,17 +174,20 @@
       </div>
       <div class="notification-controls">
         {#if notificationCount > 0}
-          <button type="button" class="notification-control" onclick={clearAllNotifications}>Clear</button>
+          <button type="button" class="notification-control is-icon" aria-label="Clear notifications" onclick={clearAllNotifications}>
+            <Icon name="trash" />
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="notification-control is-icon"
+            class:is-on={snapshot.doNotDisturb}
+            aria-label={snapshot.doNotDisturb ? "Disable do not disturb" : "Enable do not disturb"}
+            onclick={toggleDoNotDisturb}
+          >
+            <Icon name={snapshot.doNotDisturb ? "bell-off" : "bell"} />
+          </button>
         {/if}
-        <button
-          type="button"
-          class="notification-control is-icon"
-          class:is-on={snapshot.doNotDisturb}
-          aria-label={snapshot.doNotDisturb ? "Disable do not disturb" : "Enable do not disturb"}
-          onclick={toggleDoNotDisturb}
-        >
-          <Icon name={snapshot.doNotDisturb ? "bell-off" : "bell"} />
-        </button>
       </div>
     </header>
 

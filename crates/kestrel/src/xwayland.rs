@@ -75,6 +75,21 @@ impl XwaylandSatellite {
         self.display.as_deref().filter(|_| self.child.is_some())
     }
 
+    pub fn restart_due(&self, now: Instant) -> bool {
+        self.child.is_none()
+            && self
+                .next_spawn_after
+                .is_some_and(|deadline| now >= deadline)
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub fn next_restart_deadline(&self) -> Option<Instant> {
+        self.child
+            .is_none()
+            .then_some(self.next_spawn_after)
+            .flatten()
+    }
+
     fn spawn_if_due(&mut self, wayland_display: &str) {
         if self
             .next_spawn_after

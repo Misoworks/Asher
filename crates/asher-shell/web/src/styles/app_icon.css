@@ -50,6 +50,7 @@
   pointer-events: none;
   transition: transform 145ms var(--ease-shell);
   backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
 }
 
 .app-icon img,
@@ -59,6 +60,7 @@
   height: 100%;
   object-fit: contain;
   image-rendering: auto;
+  shape-rendering: geometricPrecision;
 }
 
 .app-button.is-launching .app-icon {
@@ -85,28 +87,38 @@
   will-change: transform;
 }
 
-.app-button.is-running .running-dot {
+.app-button.is-running .running-dots {
   opacity: 1;
 }
 
-.app-button.is-active .running-dot {
-  width: 24px;
+.app-button.is-active .running-dot.is-active-dot {
+  width: 18px;
   background: rgba(255, 255, 255, 0.92);
 }
 
-.app-button .running-dot {
+.app-button .running-dots {
   position: absolute;
   bottom: 0;
   left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 7px;
+  height: 3px;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 180ms var(--ease-shell);
+}
+
+.app-button .running-dot {
   width: 7px;
   height: 3px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.54);
-  opacity: 0;
-  transform: translateX(-50%) scaleX(0.8);
   transition:
     width 180ms var(--ease-shell),
-    opacity 180ms var(--ease-shell);
+    background-color 180ms var(--ease-shell);
 }
 
 @keyframes app-launch {

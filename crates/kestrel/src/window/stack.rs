@@ -1,18 +1,13 @@
 use super::{
-    MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, ManagedWindow, ResizeEdge, WindowFrameHit,
-    WindowRestoreState,
-    hit::{
-        content_contains, modifier_resize_edge_at, resize_edge_at, titlebar_contains,
-        titlebar_control_at,
-    },
+    MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, ManagedWindow, WindowRestoreState,
     surface_has_client_frame_extents,
 };
 use crate::window_animation::WindowAnimation;
 use asher_ipc::{Rect, WindowId, WorkspaceId};
 use smithay::{
-    desktop::{PopupKind, PopupManager, WindowSurfaceType, utils::under_from_surface_tree},
+    desktop::PopupManager,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point, Size},
+    utils::{Logical, Size},
     wayland::shell::xdg::ToplevelSurface,
 };
 
@@ -326,44 +321,6 @@ impl WindowStack {
         true
     }
 
-    pub fn window_at(
-        &self,
-        point: Point<f64, Logical>,
-        active_workspace: &WorkspaceId,
-    ) -> Option<ToplevelSurface> {
-        self.visible_windows_for_workspace(active_workspace)
-            .iter()
-            .copied()
-            .find(|window| interactive_contains(window, point))
-            .map(|window| window.surface.clone())
-    }
-
-    pub fn pointer_focus(
-        &self,
-        point: Point<f64, Logical>,
-        active_workspace: &WorkspaceId,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        for window in self.visible_windows_for_workspace(active_workspace) {
-            if let Some(focus) = popup_pointer_focus(window, point) {
-                return Some(focus);
-            }
-            if !content_contains(window, point) {
-                continue;
-            }
-
-            if let Some((surface, location)) = under_from_surface_tree(
-                window.surface.wl_surface(),
-                point,
-                window.surface_location(),
-                WindowSurfaceType::ALL,
-            ) {
-                return Some((surface, location.to_f64()));
-            }
-        }
-
-        None
-    }
-
     pub fn render_windows_on_workspace<'a>(
         &'a self,
         active_workspace: &WorkspaceId,
@@ -395,81 +352,14 @@ impl WindowStack {
             .map(|window| window.id)
     }
 
-    pub fn frame_hit(
-        &self,
-        point: Point<f64, Logical>,
-        active_workspace: &WorkspaceId,
-    ) -> Option<WindowFrameHit> {
-        for window in self.visible_windows_for_workspace(active_workspace) {
-            if titlebar_contains(window, point) {
-                if let Some(control) = titlebar_control_at(window, point) {
-                    return Some(WindowFrameHit::Control {
-                        id: window.id,
-                        control,
-                    });
-                }
-
-                return Some(WindowFrameHit::Titlebar {
-                    surface: window.surface.clone(),
-                });
-            }
-
-            if let Some(edge) = resize_edge_at(window, point) {
-                return Some(WindowFrameHit::Resize {
-                    surface: window.surface.clone(),
-                    edge,
-                });
-            }
-
-            if surface_contains(window, point) {
-                return None;
-            }
-        }
-
-        None
-    }
-
-    pub fn modifier_resize_at(
-        &self,
-        point: Point<f64, Logical>,
-        active_workspace: &WorkspaceId,
-    ) -> Option<(ToplevelSurface, ResizeEdge)> {
-        let window = self
-            .visible_windows_for_workspace(active_workspace)
-            .iter()
-            .copied()
-            .find(|window| interactive_contains(window, point))?;
-        let edge = modifier_resize_edge_at(window, point)?;
-        Some((window.surface.clone(), edge))
-    }
-
-    pub fn client_drag_surface_at(
-        &self,
-        point: Point<f64, Logical>,
-        active_workspace: &WorkspaceId,
-    ) -> Option<ToplevelSurface> {
-        self.visible_windows_for_workspace(active_workspace)
-            .iter()
-            .copied()
-            .find(|window| client_drag_region_contains(window, point))
-            .map(|window| window.surface.clone())
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &ManagedWindow> {
         self.windows.iter()
     }
 
-    pub fn surfaces(&self) -> Vec<WlSurface> {
-        let mut surfaces = self
-            .windows
-            .iter()
-            .map(|window| window.surface.wl_surface().clone())
-            .collect::<Vec<_>>();
-        for root in surfaces.clone() {
-            surfaces.extend(
-                PopupManager::popups_for_surface(&root)
-                    .map(|(popup, _)| popup.wl_surface().clone()),
-            );
+    pub fn visible_surfaces_for_workspace(&self, workspace: &WorkspaceId) -> Vec<WlSurface> {
+        let mut surfaces = Vec::new();
+        for window in self.visible_windows_for_workspace(workspace) {
+            push_surface_tree(&mut surfaces, window.surface.wl_surface().clone());
         }
         surfaces
     }
@@ -499,7 +389,10 @@ impl WindowStack {
         self.windows.iter().find(|window| window.id == id)
     }
 
-    fn visible_windows_for_workspace(&self, workspace: &WorkspaceId) -> Vec<&ManagedWindow> {
+    pub(super) fn visible_windows_for_workspace(
+        &self,
+        workspace: &WorkspaceId,
+    ) -> Vec<&ManagedWindow> {
         if let Some(fullscreen) = self.fullscreen_on_workspace(workspace) {
             return self
                 .windows
@@ -514,6 +407,19 @@ impl WindowStack {
             .rev()
             .filter(|window| &window.workspace == workspace && !window.hidden && !window.closing)
             .collect()
+    }
+}
+
+fn push_surface_tree(surfaces: &mut Vec<WlSurface>, root: WlSurface) {
+    push_unique_surface(surfaces, root.clone());
+    for (popup, _) in PopupManager::popups_for_surface(&root) {
+        push_unique_surface(surfaces, popup.wl_surface().clone());
+    }
+}
+
+fn push_unique_surface(surfaces: &mut Vec<WlSurface>, surface: WlSurface) {
+    if !surfaces.iter().any(|current| current == &surface) {
+        surfaces.push(surface);
     }
 }
 
@@ -533,64 +439,4 @@ fn update_effective_decoration(window: &mut ManagedWindow) -> Option<WindowDecor
         geometry: window.geometry(),
         server_decorated,
     })
-}
-
-fn interactive_contains(window: &ManagedWindow, point: Point<f64, Logical>) -> bool {
-    titlebar_contains(window, point)
-        || resize_edge_at(window, point).is_some()
-        || surface_contains(window, point)
-        || popup_contains(window, point)
-}
-
-fn surface_contains(window: &ManagedWindow, point: Point<f64, Logical>) -> bool {
-    under_from_surface_tree(
-        window.surface.wl_surface(),
-        point,
-        window.surface_location(),
-        WindowSurfaceType::ALL,
-    )
-    .is_some()
-}
-
-fn popup_pointer_focus(
-    window: &ManagedWindow,
-    point: Point<f64, Logical>,
-) -> Option<(WlSurface, Point<f64, Logical>)> {
-    for (popup, popup_offset) in PopupManager::popups_for_surface(window.surface.wl_surface()) {
-        let location = popup_location(window, &popup, popup_offset);
-        if let Some((surface, location)) =
-            under_from_surface_tree(popup.wl_surface(), point, location, WindowSurfaceType::ALL)
-        {
-            return Some((surface, location.to_f64()));
-        }
-    }
-
-    None
-}
-
-fn popup_contains(window: &ManagedWindow, point: Point<f64, Logical>) -> bool {
-    popup_pointer_focus(window, point).is_some()
-}
-
-fn popup_location(
-    window: &ManagedWindow,
-    popup: &PopupKind,
-    popup_offset: Point<i32, Logical>,
-) -> Point<i32, Logical> {
-    window.surface_location() + popup_offset - popup.geometry().loc
-}
-
-fn client_drag_region_contains(window: &ManagedWindow, point: Point<f64, Logical>) -> bool {
-    const CLIENT_DRAG_HEIGHT: f64 = 44.0;
-
-    if window.server_decorated || window.fullscreen || !surface_contains(window, point) {
-        return false;
-    }
-
-    let content = window.content_location().to_f64();
-    let size = window.size.to_f64();
-    point.x >= content.x
-        && point.x < content.x + size.w
-        && point.y >= content.y
-        && point.y < content.y + CLIENT_DRAG_HEIGHT.min(size.h)
 }

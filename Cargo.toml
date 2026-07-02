@@ -14,6 +14,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+calloop = { version = "0.14.4", features = ["signals"] }
 clap = { version = "4.6.1", features = ["derive"] }
 input = "0.9.1"
 serde = { version = "1.0.228", features = ["derive"] }

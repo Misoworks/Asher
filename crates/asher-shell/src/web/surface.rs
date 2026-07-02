@@ -7,12 +7,12 @@ use super::actions::WebShellAction;
 use super::{
     model::{WebShellSnapshot, WebShellSurface},
     surface_layout::{PANEL_HEIGHT, PANEL_WIDTH_HINT},
-    surface_sizing::{notification_toast_size, panel_menu_size, quick_settings_size},
+    surface_sizing::{
+        date_center_size, notification_toast_size, panel_menu_size, quick_settings_size,
+    },
 };
 use std::{error::Error, sync::mpsc::Sender};
 
-const DATE_CENTER_WIDTH: i32 = 360;
-const DATE_CENTER_HEIGHT: i32 = 560;
 const START_MENU_WIDTH: i32 = 720;
 const START_MENU_HEIGHT: i32 = 640;
 
@@ -60,7 +60,7 @@ impl WebSurfaces {
             ),
             date: LazyWebSurface::new(
                 WebShellSurface::DateCenter,
-                (DATE_CENTER_WIDTH, DATE_CENTER_HEIGHT),
+                date_center_size(snapshot),
                 &actions_tx,
                 snapshot,
             ),
@@ -86,6 +86,7 @@ impl WebSurfaces {
         self.start_menu.evaluate_snapshot(snapshot, json);
         self.quick.resize(quick_settings_size(snapshot));
         self.quick.evaluate_snapshot(snapshot, json);
+        self.date.resize(date_center_size(snapshot));
         self.date.evaluate_snapshot(snapshot, json);
         self.notification_toast
             .resize(notification_toast_size(snapshot));

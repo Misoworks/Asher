@@ -8,6 +8,8 @@ mod frame;
 mod runtime;
 #[cfg(feature = "session-backend")]
 mod scanout;
+#[cfg(feature = "session-backend")]
+mod scheduler;
 
 use asher_config::AsherConfig;
 use thiserror::Error;

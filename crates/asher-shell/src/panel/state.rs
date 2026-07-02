@@ -4,24 +4,33 @@ use std::path::Path;
 
 use super::PanelApp;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PanelAppState {
     pub running: bool,
     pub active: bool,
+    pub window_ids: Vec<asher_ipc::WindowId>,
+    pub active_window_id: Option<asher_ipc::WindowId>,
 }
 
 impl PanelAppState {
     pub fn for_app(app: &PanelApp, model: &ShellModel) -> Self {
-        let mut running = false;
-        let mut active = false;
+        let mut window_ids = Vec::new();
+        let mut active_window_id = None;
         for window in &model.windows {
             if panel_app_matches_window(app, window) {
-                running = true;
-                active |= window.is_active;
+                window_ids.push(window.id);
+                if window.is_active {
+                    active_window_id = Some(window.id);
+                }
             }
         }
 
-        Self { running, active }
+        Self {
+            running: !window_ids.is_empty(),
+            active: active_window_id.is_some(),
+            window_ids,
+            active_window_id,
+        }
     }
 }
 

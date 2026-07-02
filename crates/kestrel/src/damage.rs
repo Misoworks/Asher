@@ -194,8 +194,10 @@ pub(crate) fn blur_damage_elements<'a>(
     background_layer: &'a [LayerSurfaceElement],
     bottom_layer: &'a [LayerSurfaceElement],
     windows: &'a [WindowElement],
+    top_layer: &'a [LayerSurfaceElement],
 ) -> Vec<DamageElement<'a>> {
     let mut elements = Vec::new();
+    elements.extend(top_layer.iter().map(DamageElement::Surface));
     elements.extend(windows.iter().map(DamageElement::Window));
     elements.extend(bottom_layer.iter().map(DamageElement::Surface));
     elements.extend(background_layer.iter().map(DamageElement::Surface));

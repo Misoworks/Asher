@@ -2,31 +2,51 @@ use super::{
     DrmError, DrmOptions,
     device::{self, SessionDevice},
     frame::{FrameResult, SessionFrameRenderer, render_secondary_output},
+    scheduler::RenderScheduler,
 };
 use crate::{
     client::ClientState, frame_clock::send_surface_frame_tree, input::handle_input_event,
-    ipc::IpcServer, output::DEFAULT_REFRESH_MILLIHERTZ, session_services, shell::ShellProcess,
-    state::KestrelState, xwayland::XwaylandSatellite,
+    ipc::IpcServer, session_services, shell::ShellProcess, state::KestrelState,
+    xwayland::XwaylandSatellite,
 };
 use ::input::{
     Device as LibinputDevice, DeviceCapability as LibinputDeviceCapability, Led as LibinputLed,
 };
 use asher_ipc::{ShellStatus, shell_socket_path};
+use calloop::{
+    EventLoop,
+    signals::{Signal, Signals},
+};
 use smithay::{
     backend::{
-        drm::DrmEvent, input::InputEvent, libinput::LibinputInputBackend, renderer::ImportDma,
-        session::Event as SessionEvent, udev::UdevEvent,
+        drm::{DrmEvent, DrmEventMetadata},
+        input::InputEvent,
+        libinput::LibinputInputBackend,
+        renderer::ImportDma,
+        session::Event as SessionEvent,
+        udev::UdevEvent,
     },
     reexports::{
-        calloop::EventLoop,
         drm::control::crtc,
-        wayland_server::{Client, Display, ListeningSocket},
+        wayland_server::{Client, Display, ListeningSocket, protocol::wl_surface::WlSurface},
     },
+    utils::{Clock, Monotonic},
 };
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 
-const IDLE_DISPATCH: Duration = Duration::from_millis(4);
+mod process;
+mod syncobj;
+mod timing;
+
+use process::process_timeout;
+use syncobj::{clear_ready_syncobj_blockers, register_syncobj_sources};
+use timing::{presentation_time, refresh_interval};
+
+const IDLE_DISPATCH: Duration = Duration::from_millis(16);
 
 pub fn run(options: DrmOptions) -> Result<(), DrmError> {
     let mut display: Display<KestrelState> = Display::new().map_err(|error| {
@@ -69,8 +89,12 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
     let mut keyboard_led_state = keyboard.led_state();
     let mut frame_renderer =
         SessionFrameRenderer::new(&state, refresh_interval(state.output_refresh_millihertz()));
+    let mut render_scheduler =
+        RenderScheduler::new(refresh_interval(state.output_refresh_millihertz()));
+    let presentation_clock = Clock::<Monotonic>::new();
     let mut clients = Vec::new();
     let mut force_full_damage = true;
+    let mut pending_frame_callbacks: Option<Vec<WlSurface>> = None;
     let mut active = true;
     let mut loop_events = LoopEvents::default();
     let mut event_loop = EventLoop::<LoopEvents>::try_new().map_err(|error| {
@@ -85,8 +109,11 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         })?;
     event_loop
         .handle()
-        .insert_source(drm_notifier, |event, _, data| match event {
-            DrmEvent::VBlank(crtc) => data.vblank.push(crtc),
+        .insert_source(drm_notifier, |event, metadata, data| match event {
+            DrmEvent::VBlank(crtc) => data.vblank.push(VBlankEvent {
+                crtc,
+                metadata: metadata.take(),
+            }),
             DrmEvent::Error(error) => data.drm_errors.push(error.to_string()),
         })
         .map_err(|error| {
@@ -104,6 +131,21 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         .map_err(|error| {
             DrmError::Unsupported(format!("failed to register libseat source: {error}"))
         })?;
+    event_loop
+        .handle()
+        .insert_source(
+            Signals::new(&[Signal::SIGCHLD]).map_err(|error| {
+                DrmError::Unsupported(format!("failed to create SIGCHLD source: {error}"))
+            })?,
+            |event, _, data| {
+                if event.signal() == Signal::SIGCHLD {
+                    data.child_process_changed = true;
+                }
+            },
+        )
+        .map_err(|error| {
+            DrmError::Unsupported(format!("failed to register SIGCHLD source: {error}"))
+        })?;
 
     println!("Kestrel session compositor is running");
     println!("WAYLAND_DISPLAY={socket_name}");
@@ -120,6 +162,8 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         ipc.path(),
         &shell_control_socket,
         state.output_refresh_millihertz(),
+        state.output_size().w,
+        state.output_size().h,
     );
     state.shell_status = shell.status();
     info!(
@@ -142,7 +186,10 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             &mut active,
             &mut force_full_damage,
         )?;
-        release_syncobj_blockers(&mut loop_events, &mut state, &dh);
+        if !active {
+            pending_frame_callbacks = None;
+        }
+        clear_ready_syncobj_blockers(&mut loop_events, &mut state, &dh);
         for event in loop_events.udev.drain(..) {
             if !device.handles_udev_event(&event) {
                 continue;
@@ -152,6 +199,10 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
                     if device.rescan_outputs(&state.config.display)? {
                         state.set_output_descriptors(device.descriptors());
                         frame_renderer.reset_for_output(&state);
+                        render_scheduler.set_refresh_interval(refresh_interval(
+                            state.output_refresh_millihertz(),
+                        ));
+                        pending_frame_callbacks = None;
                         force_full_damage = true;
                         let descriptor = device.primary_descriptor();
                         info!(
@@ -174,8 +225,20 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         for error in loop_events.drm_errors.drain(..) {
             warn!(%error, "DRM event error");
         }
-        for crtc in loop_events.vblank.drain(..) {
-            device.frame_submitted(crtc)?;
+        for vblank in loop_events.vblank.drain(..) {
+            let primary = device.is_primary_crtc(vblank.crtc);
+            device.frame_submitted(vblank.crtc)?;
+            if primary {
+                let (presentation, presentation_instant) =
+                    presentation_time(&presentation_clock, vblank.metadata);
+                render_scheduler.frame_presented(presentation_instant);
+                if let Some(callback_surfaces) = pending_frame_callbacks.take() {
+                    let frame_time = frame_renderer.frame_presented(presentation);
+                    for surface in callback_surfaces {
+                        send_surface_frame_tree(state.output(), &surface, frame_time);
+                    }
+                }
+            }
         }
         for event in loop_events.input.drain(..) {
             if active {
@@ -198,11 +261,15 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             }
         }
 
-        xwayland.reap(&socket_name);
-        update_xwayland_state(&mut state, &xwayland, &socket_name);
+        let process_changed = loop_events.take_child_process_changed();
+        let now = Instant::now();
+        if process_changed || xwayland.restart_due(now) {
+            xwayland.reap(&socket_name);
+            update_xwayland_state(&mut state, &xwayland, &socket_name);
+        }
         if state.take_shell_restart_requested() {
             shell.restart();
-        } else {
+        } else if process_changed || shell.restart_due(now) {
             shell.reap(&mut state.config);
         }
         let shell_status = shell.status();
@@ -244,7 +311,18 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             device.sync_cursor(&mut state);
         }
 
-        if active && !device.frame_pending() {
+        if active
+            && !device.frame_pending()
+            && (force_full_damage
+                || state.scene_dirty()
+                || state.animations_active()
+                || frame_renderer.effects_active())
+        {
+            render_scheduler.request_repaint(Instant::now());
+        }
+
+        if active && !device.frame_pending() && render_scheduler.should_render(Instant::now()) {
+            let render_started = Instant::now();
             let frame_result = {
                 let (renderer, output) = device.renderer_and_primary_output();
                 let frame_result = frame_renderer.render(
@@ -269,39 +347,45 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             }
             match frame_result {
                 FrameResult::Queued {
-                    frame_time,
                     submitted: _,
+                    callback_surfaces,
                 } => {
+                    render_scheduler.frame_rendered(render_started.elapsed());
+                    pending_frame_callbacks = Some(callback_surfaces);
                     force_full_damage = false;
-                    for surface in state
-                        .windows
-                        .surfaces()
-                        .into_iter()
-                        .chain(state.layer_surfaces())
-                    {
-                        send_surface_frame_tree(state.output(), &surface, frame_time);
-                    }
                     display.flush_clients().map_err(|error| {
                         DrmError::Unsupported(format!("Wayland flush failed after frame: {error}"))
                     })?;
                 }
                 FrameResult::Idle => {
+                    render_scheduler.cancel_repaint();
+                    let timeout = process_timeout(Instant::now(), IDLE_DISPATCH, &shell, &xwayland);
                     event_loop
-                        .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
+                        .dispatch(Some(timeout), &mut loop_events)
                         .map_err(|error| {
                             DrmError::Unsupported(format!("session idle dispatch failed: {error}"))
                         })?;
                 }
             }
+        } else if active && !device.frame_pending() {
+            let now = Instant::now();
+            let timeout = render_scheduler.dispatch_timeout(now, IDLE_DISPATCH);
+            let timeout = process_timeout(now, timeout, &shell, &xwayland);
+            event_loop
+                .dispatch(Some(timeout), &mut loop_events)
+                .map_err(|error| {
+                    DrmError::Unsupported(format!("session scheduled dispatch failed: {error}"))
+                })?;
         } else if active {
             event_loop
-                .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
+                .dispatch(None, &mut loop_events)
                 .map_err(|error| {
                     DrmError::Unsupported(format!("session frame-pending dispatch failed: {error}"))
                 })?;
         } else {
+            let timeout = process_timeout(Instant::now(), IDLE_DISPATCH, &shell, &xwayland);
             event_loop
-                .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
+                .dispatch(Some(timeout), &mut loop_events)
                 .map_err(|error| {
                     DrmError::Unsupported(format!("paused session dispatch failed: {error}"))
                 })?;
@@ -312,47 +396,23 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
 #[derive(Default)]
 struct LoopEvents {
     input: Vec<InputEvent<LibinputInputBackend>>,
-    vblank: Vec<crtc::Handle>,
+    vblank: Vec<VBlankEvent>,
     drm_errors: Vec<String>,
     session: Vec<SessionEvent>,
     udev: Vec<UdevEvent>,
     syncobj_ready: Vec<Client>,
+    child_process_changed: bool,
 }
 
-fn release_syncobj_blockers(
-    events: &mut LoopEvents,
-    state: &mut KestrelState,
-    dh: &smithay::reexports::wayland_server::DisplayHandle,
-) {
-    for client in events.syncobj_ready.drain(..) {
-        let Some(client_state) = client.get_data::<ClientState>() else {
-            continue;
-        };
-        client_state.compositor_state.blocker_cleared(state, dh);
-        state.mark_scene_dirty();
-    }
+struct VBlankEvent {
+    crtc: crtc::Handle,
+    metadata: Option<DrmEventMetadata>,
 }
 
-fn register_syncobj_sources(
-    state: &mut KestrelState,
-    event_loop: &EventLoop<LoopEvents>,
-) -> Result<(), DrmError> {
-    for pending in state.take_syncobj_sources() {
-        let client = pending.client;
-        event_loop
-            .handle()
-            .insert_source(pending.source, move |(), _, events| {
-                events.syncobj_ready.push(client.clone());
-                Ok(())
-            })
-            .map_err(|error| {
-                DrmError::Unsupported(format!(
-                    "failed to register drm syncobj acquire source: {error}"
-                ))
-            })?;
+impl LoopEvents {
+    fn take_child_process_changed(&mut self) -> bool {
+        std::mem::take(&mut self.child_process_changed)
     }
-
-    Ok(())
 }
 
 fn register_keyboard_device(
@@ -433,12 +493,4 @@ fn bind_socket(socket_name: Option<&str>) -> Result<ListeningSocket, DrmError> {
         None => ListeningSocket::bind_auto("asher", 1..33),
     }
     .map_err(|error| DrmError::Unsupported(format!("failed to bind Wayland socket: {error}")))
-}
-
-fn refresh_interval(refresh_millihertz: i32) -> Duration {
-    let refresh = u64::try_from(refresh_millihertz)
-        .ok()
-        .filter(|refresh| *refresh > 0)
-        .unwrap_or(DEFAULT_REFRESH_MILLIHERTZ as u64);
-    Duration::from_nanos((1_000_000_000_000u64 + refresh / 2) / refresh)
 }

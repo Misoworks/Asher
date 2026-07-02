@@ -312,6 +312,7 @@ fn prepare_graphical_argv(argv: &mut Vec<String>) {
     push_unique_switch(argv, "--ozone-platform=wayland");
     push_unique_switch(argv, "--enable-features=UseOzonePlatform");
     push_unique_switch(argv, "--disable-vulkan");
+    push_unique_switch(argv, "--use-angle=gl");
     push_unique_switch(
         argv,
         "--disable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
@@ -330,21 +331,28 @@ fn push_unique_switch(argv: &mut Vec<String>, switch: &str) {
 }
 
 fn is_chromium_family_launch(argv: &[String]) -> bool {
-    let Some(program) = launched_program(argv) else {
-        return false;
-    };
-    let name = program.rsplit('/').next().unwrap_or(program).to_lowercase();
-    name.contains("chrome")
-        || name.contains("chromium")
-        || name.contains("brave")
-        || name.contains("edge")
-        || name.contains("electron")
-        || name.contains("codex")
-        || name.contains("cursor")
-        || name.contains("curseforge")
+    chromium_launch_names(argv).any(|name| {
+        name.contains("chrome")
+            || name.contains("chromium")
+            || name.contains("brave")
+            || name.contains("edge")
+            || name.contains("electron")
+            || name.contains("codex")
+            || name.contains("cursor")
+            || name.contains("curseforge")
+            || name.contains("equibop")
+            || name.contains("discord")
+    })
 }
 
-fn launched_program(argv: &[String]) -> Option<&str> {
+fn chromium_launch_names(argv: &[String]) -> impl Iterator<Item = String> + '_ {
+    argv.iter()
+        .skip(launch_arg_start(argv))
+        .filter(|arg| !arg.starts_with('-') && !arg.contains('='))
+        .map(|arg| arg.rsplit('/').next().unwrap_or(arg).to_lowercase())
+}
+
+fn launch_arg_start(argv: &[String]) -> usize {
     let mut index = 0;
     if argv.first().is_some_and(|arg| arg == "env") {
         index = 1;
@@ -360,7 +368,7 @@ fn launched_program(argv: &[String]) -> Option<&str> {
             break;
         }
     }
-    argv.get(index).map(String::as_str)
+    index
 }
 
 fn apply_app_environment(command: &mut Command, xwayland_display: Option<&str>) {

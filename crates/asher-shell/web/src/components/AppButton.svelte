@@ -14,7 +14,7 @@
     reorderable = true,
   }: {
     app: PanelApp;
-    onlaunch: (command: string) => void;
+    onlaunch: (app: PanelApp) => void;
     onmenu?: (command: string, x: number) => void;
     onreorderstart?: (command: string) => void;
     onreorderover?: (command: string, after: boolean) => void;
@@ -79,8 +79,14 @@
         }, 180);
       }
     }, 430);
-    onlaunch(app.command);
+    onlaunch(app);
   }
+
+  const runningDots = $derived(
+    Array.from({
+      length: Math.min(4, Math.max(app.windowIds.length, app.running ? 1 : 0)),
+    }),
+  );
 
   function pointerEnter() {
     hovered = true;
@@ -196,5 +202,9 @@
   onpointerleave={pointerLeave}
 >
   <AppIcon {app} />
-  <span class="running-dot"></span>
+  <span class="running-dots" aria-hidden="true">
+    {#each runningDots as _, index (`${app.command}-${index}`)}
+      <span class="running-dot" class:is-active-dot={app.active && index === 0}></span>
+    {/each}
+  </span>
 </button>

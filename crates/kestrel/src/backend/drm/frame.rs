@@ -20,7 +20,8 @@ use crate::{
 };
 use smithay::{
     backend::renderer::{Bind, Color32F, Frame, Renderer, gles::GlesRenderer},
-    utils::{Physical, Rectangle, Transform},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::{Monotonic, Physical, Rectangle, Time, Transform},
     wayland::shell::wlr_layer::Layer,
 };
 use std::time::{Duration, Instant};
@@ -28,8 +29,8 @@ use std::time::{Duration, Instant};
 pub enum FrameResult {
     Idle,
     Queued {
-        frame_time: FrameTime,
         submitted: SubmittedFrame,
+        callback_surfaces: Vec<WlSurface>,
     },
 }
 
@@ -212,8 +213,8 @@ impl SessionFrameRenderer {
         {
             self.previous_frame_direct = true;
             return Ok(FrameResult::Queued {
-                frame_time: self.frame_clock.next_frame(),
                 submitted: SubmittedFrame::Direct,
+                callback_surfaces: state.frame_callback_surfaces(),
             });
         }
 
@@ -290,8 +291,8 @@ impl SessionFrameRenderer {
                 })?;
             self.previous_frame_direct = false;
             return Ok(FrameResult::Queued {
-                frame_time: self.frame_clock.next_frame(),
                 submitted: SubmittedFrame::Composited,
+                callback_surfaces: state.frame_callback_surfaces(),
             });
         }
 
@@ -302,6 +303,13 @@ impl SessionFrameRenderer {
         self.shell_layers_seen_ready = false;
     }
 
+    pub fn frame_presented(&mut self, presentation: Option<(Time<Monotonic>, u64)>) -> FrameTime {
+        match presentation {
+            Some((time, sequence)) => self.frame_clock.frame_at_sequence(time, sequence),
+            None => self.frame_clock.next_frame(),
+        }
+    }
+
     pub fn reset_for_output(&mut self, state: &KestrelState) {
         let frame_interval = refresh_interval(state.output_refresh_millihertz());
         self.frame_clock.set_refresh(frame_interval);
@@ -309,6 +317,10 @@ impl SessionFrameRenderer {
         self.blur_damage_tracker = DamageTracker::from_output(state.output());
         self.blur_cache.retain_targets(&[]);
         self.previous_frame_direct = false;
+    }
+
+    pub fn effects_active(&self) -> bool {
+        self.blur_cache.is_animating()
     }
 }
 

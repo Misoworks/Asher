@@ -67,7 +67,9 @@ impl WebShellSnapshot {
                     running: state.running,
                     active: state.active,
                     pinned: true,
-                    window_id: None,
+                    window_id: primary_window_id(&state.window_ids, state.active_window_id),
+                    window_ids: state.window_ids.iter().map(|id| id.0).collect(),
+                    active_window_id: state.active_window_id.map(|id| id.0),
                 }
             })
             .collect();
@@ -178,22 +180,55 @@ fn append_running_window_app(
     if matched_app.is_none() && icon_uri.is_none() {
         return;
     }
-    let label = window
-        .title
-        .clone()
-        .or_else(|| matched_app.map(|app| app.name.clone()))
+    let label = matched_app
+        .map(|app| app.name.clone())
+        .or_else(|| window.title.clone())
         .or_else(|| window.app_id.clone())
         .unwrap_or_else(|| "Window".to_string());
+    let command = matched_app
+        .map(|app| normalize_launch_command(&app.command))
+        .or_else(|| window.app_id.as_deref().map(window_group_command))
+        .unwrap_or_else(|| format!("window:{}", window.id.0));
+
+    if let Some(app) = panel_apps
+        .iter_mut()
+        .find(|app| !app.pinned && app.command == command)
+    {
+        app.running = true;
+        app.active |= window.is_active;
+        app.window_ids.push(window.id.0);
+        if window.is_active {
+            app.active_window_id = Some(window.id.0);
+            app.window_id = Some(window.id.0);
+        } else if app.window_id.is_none() {
+            app.window_id = Some(window.id.0);
+        }
+        if app.icon_uri.is_none() {
+            app.icon_uri = icon_uri;
+        }
+        return;
+    }
 
     panel_apps.push(WebPanelApp {
         label,
-        command: format!("window:{}", window.id.0),
+        command,
         icon_uri,
         running: true,
         active: window.is_active,
         pinned: false,
         window_id: Some(window.id.0),
+        window_ids: vec![window.id.0],
+        active_window_id: window.is_active.then_some(window.id.0),
     });
+}
+
+fn primary_window_id(
+    window_ids: &[asher_ipc::WindowId],
+    active_window_id: Option<asher_ipc::WindowId>,
+) -> Option<u64> {
+    active_window_id
+        .or_else(|| window_ids.first().copied())
+        .map(|id| id.0)
 }
 
 fn user_profile_icon_uri() -> Option<String> {
@@ -263,6 +298,10 @@ fn normalized_identifier(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn window_group_command(value: &str) -> String {
+    format!("window-group:{}", normalized_identifier(value))
 }
 
 fn command_name(command: &str) -> Option<&str> {

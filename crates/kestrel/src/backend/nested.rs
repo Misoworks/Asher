@@ -45,6 +45,7 @@ use tracing::{debug, info};
 
 const REFRESH_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 const PENDING_REFRESH_CHECK_INTERVAL: Duration = Duration::from_millis(50);
+const PROCESS_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct NestedOptions {
     pub config: AsherConfig,
@@ -83,6 +84,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
     let mut frame_interval = refresh_interval(output.refresh_millihertz);
     let mut frame_clock = FrameClock::new(frame_interval);
     let mut last_refresh_check = Instant::now() - REFRESH_CHECK_INTERVAL;
+    let mut last_process_check = Instant::now() - PROCESS_CHECK_INTERVAL;
     let mut damage_tracker = DamageTracker::from_output(state.output());
     let mut blur_damage_tracker = DamageTracker::from_output(state.output());
     let mut layer_geometry = LayerGeometryTracker::default();
@@ -106,6 +108,8 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
         ipc.path(),
         &shell_control_socket,
         output.refresh_millihertz,
+        output.size.w,
+        output.size.h,
     );
     state.shell_status = shell.status();
     info!(
@@ -167,33 +171,42 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
         let finished_window_closes = state.send_finished_window_closes();
         state.cleanup_layers();
         state.cleanup_output();
-        xwayland.reap(&socket_name);
-        let xwayland_status = xwayland.status();
-        if state.xwayland_status != xwayland_status {
-            state.xwayland_status = xwayland_status;
-            state.mark_scene_dirty();
+        let process_check_due = last_process_check.elapsed() >= PROCESS_CHECK_INTERVAL
+            || xwayland.restart_due(frame_started)
+            || shell.restart_due(frame_started);
+        if process_check_due {
+            last_process_check = Instant::now();
+            xwayland.reap(&socket_name);
+            let xwayland_status = xwayland.status();
+            if state.xwayland_status != xwayland_status {
+                state.xwayland_status = xwayland_status;
+                state.mark_scene_dirty();
+            }
+            let xwayland_display = xwayland.display().map(str::to_string);
+            if state.xwayland_display != xwayland_display {
+                state.xwayland_display = xwayland_display;
+                session_services::sync_activation_environment(
+                    &socket_name,
+                    state.xwayland_display.as_deref(),
+                );
+                state.mark_scene_dirty();
+            }
         }
-        let xwayland_display = xwayland.display().map(str::to_string);
-        if state.xwayland_display != xwayland_display {
-            state.xwayland_display = xwayland_display;
-            session_services::sync_activation_environment(
-                &socket_name,
-                state.xwayland_display.as_deref(),
-            );
-            state.mark_scene_dirty();
-        }
-        if state.take_shell_restart_requested() {
+        let shell_restarted = state.take_shell_restart_requested();
+        if shell_restarted {
             shell.restart();
-        } else {
+        } else if process_check_due {
             shell.reap(&mut state.config);
         }
-        let shell_status = shell.status();
-        if state.shell_status != shell_status {
-            state.shell_status = shell_status;
-            if shell_status != ShellStatus::Running {
-                shell_layers_seen_ready = false;
+        if process_check_due || shell_restarted {
+            let shell_status = shell.status();
+            if state.shell_status != shell_status {
+                state.shell_status = shell_status;
+                if shell_status != ShellStatus::Running {
+                    shell_layers_seen_ready = false;
+                }
+                state.mark_scene_dirty();
             }
-            state.mark_scene_dirty();
         }
         if ipc.handle_pending(&mut state, &keyboard)? {
             state.mark_scene_dirty();
@@ -360,12 +373,7 @@ pub fn run(options: NestedOptions) -> Result<(), NestedError> {
 
         if rendered {
             let frame_time = frame_clock.next_frame();
-            for surface in state
-                .windows
-                .surfaces()
-                .into_iter()
-                .chain(state.layer_surfaces())
-            {
+            for surface in state.frame_callback_surfaces() {
                 send_surface_frame_tree(state.output(), &surface, frame_time);
             }
 

@@ -12,6 +12,8 @@ const NORMAL_RESTART_DELAY: Duration = Duration::from_millis(500);
 const PRIVATE_DBUS_ENV: &str = "ASHER_PRIVATE_DBUS";
 const USE_HOST_DBUS_ENV: &str = "ASHER_USE_HOST_DBUS";
 const OUTPUT_REFRESH_ENV: &str = "ASHER_OUTPUT_REFRESH_MILLIHERTZ";
+const OUTPUT_WIDTH_ENV: &str = "ASHER_OUTPUT_WIDTH";
+const OUTPUT_HEIGHT_ENV: &str = "ASHER_OUTPUT_HEIGHT";
 
 #[derive(Debug)]
 pub struct ShellProcess {
@@ -22,6 +24,8 @@ pub struct ShellProcess {
     ipc_socket: PathBuf,
     shell_socket: PathBuf,
     output_refresh_millihertz: i32,
+    output_width: i32,
+    output_height: i32,
     next_spawn_after: Option<Instant>,
 }
 
@@ -32,6 +36,8 @@ impl ShellProcess {
         ipc_socket: &Path,
         shell_socket: &Path,
         output_refresh_millihertz: i32,
+        output_width: i32,
+        output_height: i32,
     ) -> Self {
         let binary = shell_binary();
         if binary.is_none() {
@@ -47,6 +53,8 @@ impl ShellProcess {
             ipc_socket: ipc_socket.to_path_buf(),
             shell_socket: shell_socket.to_path_buf(),
             output_refresh_millihertz,
+            output_width,
+            output_height,
             next_spawn_after: None,
         };
         shell.spawn();
@@ -88,6 +96,21 @@ impl ShellProcess {
 
     pub fn restart(&mut self) {
         self.restart_now();
+    }
+
+    pub fn restart_due(&self, now: Instant) -> bool {
+        self.child.is_none()
+            && self
+                .next_spawn_after
+                .is_some_and(|deadline| now >= deadline)
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub fn next_restart_deadline(&self) -> Option<Instant> {
+        self.child
+            .is_none()
+            .then_some(self.next_spawn_after)
+            .flatten()
     }
 
     fn restart_now(&mut self) {
@@ -132,6 +155,8 @@ impl ShellProcess {
                 OUTPUT_REFRESH_ENV,
                 self.output_refresh_millihertz.max(1).to_string(),
             )
+            .env(OUTPUT_WIDTH_ENV, self.output_width.max(1).to_string())
+            .env(OUTPUT_HEIGHT_ENV, self.output_height.max(1).to_string())
             .env(SOCKET_ENV, &self.ipc_socket)
             .env(SHELL_SOCKET_ENV, &self.shell_socket);
         for (name, value) in cursor_environment_entries() {

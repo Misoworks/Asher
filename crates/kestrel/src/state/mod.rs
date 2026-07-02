@@ -1,11 +1,10 @@
 use crate::{
-    layers,
     layout_config::layout_from_config,
     output::{NestedOutput, OutputDescriptor, OutputGraph},
     protocol_state::ProtocolState,
     titlebar::TitlebarCache,
     window::{WindowGrab, WindowStack},
-    workspace_transition::{WorkspaceTransition, WorkspaceTransitionSnapshot},
+    workspace_transition::WorkspaceTransition,
 };
 use asher_config::AsherConfig;
 use asher_ipc::{LayoutEngine, LayoutError, Rect, WindowId, WindowInfo, WorkspaceId};
@@ -23,27 +22,26 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Serial},
+    utils::{Logical, Point},
     wayland::{
         compositor::CompositorState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         shell::{
-            wlr_layer::{LayerSurface, WlrLayerShellState},
+            wlr_layer::WlrLayerShellState,
             xdg::{ToplevelSurface, XdgShellState},
         },
         shm::ShmState,
     },
 };
-#[cfg(feature = "session-backend")]
-use smithay::{
-    backend::drm::DrmDeviceFd,
-    reexports::wayland_server::Client,
-    wayland::drm_syncobj::{DrmSyncPointSource, DrmSyncobjState, supports_syncobj_eventfd},
-};
 use std::{cell::RefCell, path::PathBuf};
 use tracing::debug;
 
+mod frame_callbacks;
+mod input;
+mod layers;
 mod output_state;
+mod scene;
+mod session;
 mod shell_control;
 
 pub struct KestrelState {
@@ -80,7 +78,7 @@ pub struct KestrelState {
     pub titlebar_cache: RefCell<TitlebarCache>,
     pub dmabuf_formats: FormatSet,
     #[cfg(feature = "session-backend")]
-    pending_syncobj_sources: Vec<PendingSyncobjSource>,
+    pending_syncobj_sources: Vec<session::PendingSyncobjSource>,
     pending_keyboard_led_state: Option<LedState>,
     scene_dirty: bool,
     workspace_transition: Option<WorkspaceTransition>,
@@ -161,91 +159,18 @@ impl KestrelState {
         }
     }
 
-    pub fn next_serial(&mut self) -> Serial {
-        let serial = self.serial;
-        self.serial = self.serial.wrapping_add(1).max(1);
-        Serial::from(serial)
-    }
-
-    pub fn allow_client_grab(&mut self, surface: ToplevelSurface, _serial: Serial) {
-        self.pending_client_grab = Some(ClientGrabSerial { surface });
-    }
-
-    pub fn clear_client_grab(&mut self) {
-        self.pending_client_grab = None;
-    }
-
-    pub fn client_grab_allowed(&self, surface: &ToplevelSurface, _serial: Serial) -> bool {
-        self.pending_client_grab
-            .as_ref()
-            .is_some_and(|grab| &grab.surface == surface)
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub fn enable_dmabuf(&mut self, main_device: u64, formats: FormatSet) {
-        use smithay::backend::allocator::Format;
-        use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
-
-        if self.protocol_state.dmabuf_global.is_some() {
-            return;
-        }
-
-        let advertised_formats = formats.iter().copied().collect::<Vec<Format>>();
-        if advertised_formats.is_empty() {
-            return;
-        }
-
-        let global = match DmabufFeedbackBuilder::new(main_device as _, advertised_formats.clone())
-            .build()
-        {
-            Ok(feedback) => self
-                .protocol_state
-                .dmabuf
-                .create_global_with_default_feedback::<Self>(&self.display_handle, &feedback),
-            Err(error) => {
-                tracing::warn!(%error, "failed to build dmabuf feedback; falling back to v3 dmabuf");
-                self.protocol_state
-                    .dmabuf
-                    .create_global::<Self>(&self.display_handle, advertised_formats)
-            }
-        };
-        self.protocol_state.dmabuf_global = Some(global);
-        self.dmabuf_formats = formats;
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub fn enable_drm_syncobj(&mut self, import_device: DrmDeviceFd) {
-        if let Some(syncobj) = self.protocol_state.drm_syncobj.as_mut() {
-            syncobj.update_device(import_device);
-            return;
-        }
-
-        if !supports_syncobj_eventfd(&import_device) {
-            debug!("DRM device does not support syncobj eventfd; explicit sync disabled");
-            return;
-        }
-
-        self.protocol_state.drm_syncobj = Some(DrmSyncobjState::new::<Self>(
-            &self.display_handle,
-            import_device,
-        ));
-        debug!("enabled linux-drm-syncobj explicit sync");
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub(crate) fn queue_syncobj_source(&mut self, client: Client, source: DrmSyncPointSource) {
-        self.pending_syncobj_sources
-            .push(PendingSyncobjSource { client, source });
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub(crate) fn take_syncobj_sources(&mut self) -> Vec<PendingSyncobjSource> {
-        std::mem::take(&mut self.pending_syncobj_sources)
-    }
-
     pub fn map_toplevel(&mut self, surface: ToplevelSurface) {
-        let workspace = self.layout.active_workspace().clone();
-        let geometry = self.next_initial_window_geometry();
+        let parent = self.parent_window_for_toplevel(&surface);
+        let workspace = parent
+            .and_then(|id| {
+                self.windows
+                    .window(id)
+                    .map(|window| window.workspace.clone())
+            })
+            .unwrap_or_else(|| self.layout.active_workspace().clone());
+        let geometry = parent
+            .map(|id| self.next_transient_window_geometry_for_size(id, (900, 560).into()))
+            .unwrap_or_else(|| self.next_initial_window_geometry());
         let info = WindowInfo::new(asher_ipc::WindowId(0), workspace.clone(), geometry);
 
         match self.layout.register_window(info) {
@@ -260,6 +185,9 @@ impl KestrelState {
                     requested_server_decoration,
                     true,
                 );
+                if let Some(parent) = parent {
+                    self.raise_transient(parent, id);
+                }
                 self.enter_output(surface.wl_surface());
                 self.mark_scene_dirty();
             }
@@ -278,7 +206,12 @@ impl KestrelState {
             return false;
         };
 
-        let geometry = self.next_initial_window_geometry_for_size(size);
+        let geometry = self
+            .windows
+            .window(id)
+            .and_then(|window| self.parent_window_for_toplevel(&window.surface))
+            .map(|parent| self.next_transient_window_geometry_for_size(parent, size))
+            .unwrap_or_else(|| self.next_initial_window_geometry_for_size(size));
         let Some((_surface, geometry)) = self.windows.set_geometry(id, geometry) else {
             return false;
         };
@@ -289,7 +222,27 @@ impl KestrelState {
         true
     }
 
+    pub fn sync_toplevel_parent(&mut self, surface: &ToplevelSurface) {
+        let Some(id) = self.windows.id_for_surface(surface) else {
+            return;
+        };
+        let Some(parent) = self.parent_window_for_toplevel(surface) else {
+            return;
+        };
+        if let Some(workspace) = self
+            .windows
+            .window(parent)
+            .map(|window| window.workspace.clone())
+        {
+            let _ = self.layout.move_window_to_workspace(id, &workspace);
+            self.windows.set_workspace(id, workspace);
+        }
+        self.raise_transient(parent, id);
+        self.mark_scene_dirty();
+    }
+
     pub fn unmap_toplevel(&mut self, surface: &ToplevelSurface) {
+        self.dismiss_popups_for_surface(surface.wl_surface());
         self.leave_output(surface.wl_surface());
         if let Some(window) = self.windows.remove(surface) {
             self.layout.unregister_window(window.id);
@@ -453,30 +406,6 @@ impl KestrelState {
         self.switch_workspace(keyboard, &workspace)
     }
 
-    pub fn workspace_transition(&self) -> Option<WorkspaceTransitionSnapshot> {
-        self.workspace_transition
-            .as_ref()
-            .and_then(WorkspaceTransition::snapshot)
-    }
-
-    pub fn mark_scene_dirty(&mut self) {
-        self.scene_dirty = true;
-    }
-
-    pub fn take_scene_dirty(&mut self) -> bool {
-        let dirty = self.scene_dirty;
-        self.scene_dirty = false;
-        dirty
-    }
-
-    pub fn animations_active(&self) -> bool {
-        self.windows.animations_active()
-            || self
-                .workspace_transition
-                .as_ref()
-                .is_some_and(WorkspaceTransition::is_active)
-    }
-
     fn switch_layout_workspace(&mut self, workspace: &WorkspaceId) -> Result<(), LayoutError> {
         let from = self.layout.active_workspace().clone();
         self.layout.switch_workspace(workspace)?;
@@ -545,55 +474,14 @@ impl KestrelState {
         }
     }
 
-    pub fn map_layer_surface(&mut self, surface: LayerSurface, namespace: String) {
-        self.enter_output(surface.wl_surface());
-        layers::map(self.output(), surface, namespace);
+    fn parent_window_for_toplevel(&self, surface: &ToplevelSurface) -> Option<WindowId> {
+        let parent = surface.parent()?;
+        self.windows.id_for_wl_surface(&parent)
     }
 
-    pub fn unmap_layer_surface(&mut self, surface: &LayerSurface) {
-        self.leave_output(surface.wl_surface());
-        layers::unmap(self.output(), surface);
-    }
-
-    pub fn arrange_layers(&self) {
-        layers::arrange(self.output());
-    }
-
-    pub fn cleanup_layers(&mut self) {
-        layers::cleanup(self.output());
-        self.popup_manager.cleanup();
-    }
-
-    pub fn layer_surfaces(&self) -> Vec<WlSurface> {
-        let mut surfaces = layers::surfaces(self.output());
-        let roots = surfaces.clone();
-        for root in roots {
-            surfaces.extend(
-                PopupManager::popups_for_surface(&root)
-                    .map(|(popup, _)| popup.wl_surface().clone()),
-            );
-        }
-        surfaces
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub fn has_visible_popups(&self) -> bool {
-        self.windows.iter().any(|window| {
-            PopupManager::popups_for_surface(window.surface.wl_surface())
-                .next()
-                .is_some()
-        }) || layers::surfaces(self.output())
-            .iter()
-            .any(|surface| PopupManager::popups_for_surface(surface).next().is_some())
-    }
-
-    pub(crate) fn set_pending_keyboard_led_state(&mut self, led_state: LedState) {
-        self.pending_keyboard_led_state = Some(led_state);
-    }
-
-    #[cfg(feature = "session-backend")]
-    pub(crate) fn take_pending_keyboard_led_state(&mut self) -> Option<LedState> {
-        self.pending_keyboard_led_state.take()
+    fn raise_transient(&mut self, parent: WindowId, child: WindowId) {
+        let _ = self.windows.raise_by_id(parent);
+        let _ = self.windows.raise_by_id(child);
     }
 }
 
@@ -606,10 +494,4 @@ pub struct ClientGrabSerial {
 pub struct PendingWindowDrag {
     pub surface: ToplevelSurface,
     pub pointer_start: Point<f64, Logical>,
-}
-
-#[cfg(feature = "session-backend")]
-pub(crate) struct PendingSyncobjSource {
-    pub client: Client,
-    pub source: DrmSyncPointSource,
 }

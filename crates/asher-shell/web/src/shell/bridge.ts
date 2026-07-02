@@ -138,6 +138,10 @@ function normalizeSnapshot(snapshot?: ShellSnapshot): ShellSnapshot {
     status: {
       ...snapshot?.status,
     },
+    panelApps: (snapshot?.panelApps ?? emptySnapshot().panelApps).map((app) => ({
+      ...app,
+      windowIds: app.windowIds ?? (app.windowId === undefined ? [] : [app.windowId]),
+    })),
   };
 }
 

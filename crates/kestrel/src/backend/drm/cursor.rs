@@ -3,7 +3,7 @@ use crate::state::KestrelState;
 use asher_config::DEFAULT_CURSOR_THEME_DIR;
 use smithay::{
     backend::drm::{DrmDevice, DrmDeviceFd},
-    input::pointer::{CursorIcon, CursorImageStatus},
+    input::pointer::CursorImageStatus,
     reexports::drm::{
         buffer::{Buffer, DrmFourcc},
         control::{Device as ControlDevice, crtc, dumbbuffer::DumbBuffer},
@@ -11,6 +11,9 @@ use smithay::{
 };
 use std::{env, fs, path::PathBuf};
 use tracing::warn;
+
+mod name;
+use name::cursor_name;
 
 const ARROW_WIDTH: u32 = 28;
 const ARROW_HEIGHT: u32 = 28;
@@ -430,35 +433,6 @@ fn parse_xcursor(bytes: &[u8], max_width: u32, max_height: u32) -> Option<Xcurso
         yhot,
         pixels,
     })
-}
-
-fn cursor_name(image: &CursorImageStatus) -> &'static str {
-    let CursorImageStatus::Named(icon) = image else {
-        return "default";
-    };
-    match icon {
-        CursorIcon::Pointer => "pointer",
-        CursorIcon::Text => "text",
-        CursorIcon::Grab => "grab",
-        CursorIcon::Grabbing => "grabbing",
-        CursorIcon::EResize | CursorIcon::WResize | CursorIcon::EwResize => "ew-resize",
-        CursorIcon::NResize | CursorIcon::SResize | CursorIcon::NsResize => "ns-resize",
-        CursorIcon::NeResize | CursorIcon::SwResize | CursorIcon::NeswResize => "nesw-resize",
-        CursorIcon::NwResize | CursorIcon::SeResize | CursorIcon::NwseResize => "nwse-resize",
-        CursorIcon::Crosshair => "crosshair",
-        CursorIcon::Wait | CursorIcon::Progress => "wait",
-        CursorIcon::Help => "help",
-        CursorIcon::ZoomIn => "zoom-in",
-        CursorIcon::ZoomOut => "zoom-out",
-        CursorIcon::NotAllowed | CursorIcon::NoDrop => "no-drop",
-        CursorIcon::Copy => "copy",
-        CursorIcon::Alias => "alias",
-        CursorIcon::AllScroll => "all-scroll",
-        CursorIcon::Cell => "cell",
-        CursorIcon::ContextMenu => "context-menu",
-        CursorIcon::VerticalText => "vertical-text",
-        _ => "default",
-    }
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {

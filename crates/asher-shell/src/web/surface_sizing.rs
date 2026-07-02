@@ -3,9 +3,13 @@ use crate::apps::normalize_launch_command;
 
 pub(crate) const QUICK_SETTINGS_WIDTH: i32 = 420;
 pub(crate) const NOTIFICATION_TOAST_WIDTH: i32 = 380;
-pub(crate) const NOTIFICATION_TOAST_BASE_HEIGHT: i32 = 136;
-pub(crate) const NOTIFICATION_TOAST_ACTION_HEIGHT: i32 = 171;
+pub(crate) const NOTIFICATION_TOAST_BASE_HEIGHT: i32 = 112;
+pub(crate) const NOTIFICATION_TOAST_BODY_HEIGHT: i32 = 126;
+pub(crate) const NOTIFICATION_TOAST_ACTION_HEIGHT: i32 = 153;
 pub(crate) const DOCK_MENU_WIDTH: i32 = 184;
+pub(crate) const DATE_CENTER_WIDTH: i32 = 360;
+const DATE_CENTER_COMPACT_HEIGHT: i32 = 560;
+const DATE_CENTER_VERTICAL_MARGIN: i32 = 80;
 
 pub(crate) fn quick_settings_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
     let status_tiles = 1
@@ -22,18 +26,37 @@ pub(crate) fn quick_settings_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
 }
 
 pub(crate) fn notification_toast_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
-    let height = snapshot
-        .toast_notifications
-        .first()
-        .filter(|notification| {
-            notification
+    let height = snapshot.toast_notifications.first().map_or(
+        NOTIFICATION_TOAST_BASE_HEIGHT,
+        |notification| {
+            if notification
                 .actions
                 .iter()
                 .any(|action| action.key != "default")
-        })
-        .map(|_| NOTIFICATION_TOAST_ACTION_HEIGHT)
-        .unwrap_or(NOTIFICATION_TOAST_BASE_HEIGHT);
+            {
+                NOTIFICATION_TOAST_ACTION_HEIGHT
+            } else if notification.body.trim().is_empty() {
+                NOTIFICATION_TOAST_BASE_HEIGHT
+            } else {
+                NOTIFICATION_TOAST_BODY_HEIGHT
+            }
+        },
+    );
     (NOTIFICATION_TOAST_WIDTH, height)
+}
+
+pub(crate) fn date_center_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
+    if snapshot.notifications.is_empty() {
+        return (DATE_CENTER_WIDTH, DATE_CENTER_COMPACT_HEIGHT);
+    }
+    let output_height = std::env::var("ASHER_OUTPUT_HEIGHT")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(DATE_CENTER_COMPACT_HEIGHT + DATE_CENTER_VERTICAL_MARGIN);
+    (
+        DATE_CENTER_WIDTH,
+        (output_height - DATE_CENTER_VERTICAL_MARGIN).max(DATE_CENTER_COMPACT_HEIGHT),
+    )
 }
 
 pub(crate) fn panel_menu_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
@@ -48,10 +71,11 @@ pub(crate) fn panel_menu_size(snapshot: &WebShellSnapshot) -> (i32, i32) {
     let window = matched_window(app, &snapshot.windows);
     let action_count = if let Some(window) = window {
         let focus = i32::from(!window.active);
-        let open_new = i32::from(app.pinned);
-        focus + open_new + 3
+        let open_new = i32::from(app.pinned || can_launch_app(app));
+        let pinning = i32::from(app.pinned || can_launch_app(app));
+        focus + open_new + pinning + 3
     } else if app.running {
-        3
+        1 + i32::from(can_launch_app(app)) + i32::from(app.pinned || can_launch_app(app))
     } else {
         2
     };
@@ -81,6 +105,9 @@ fn matched_window<'a>(app: &WebPanelApp, windows: &'a [WebWindow]) -> Option<&'a
 }
 
 fn window_matches_app(window: &WebWindow, app: &WebPanelApp) -> bool {
+    if app.window_ids.contains(&window.id) {
+        return true;
+    }
     if app.window_id.is_some_and(|id| id == window.id) {
         return true;
     }
@@ -95,6 +122,10 @@ fn window_matches_app(window: &WebWindow, app: &WebPanelApp) -> bool {
                 && ((!command.is_empty() && text.contains(&command))
                     || (!label.is_empty() && text.contains(&label)))
         })
+}
+
+fn can_launch_app(app: &WebPanelApp) -> bool {
+    !app.command.starts_with("window:") && !app.command.starts_with("window-group:")
 }
 
 fn command_name(command: &str) -> String {

@@ -11,6 +11,10 @@ impl WebShell {
     pub(super) fn activate_panel_command(&mut self, command: String) {
         let command = normalize_launch_command(&command);
         self.close_panel_menu();
+        if let Some(window) = window_command_id(&command) {
+            self.activate_task_window(window);
+            return;
+        }
         let Some(app) = self
             .panel_apps
             .iter()
@@ -184,6 +188,10 @@ impl WebShell {
             self.tray.activate(item, 0, 0);
         }
     }
+}
+
+fn window_command_id(command: &str) -> Option<u64> {
+    command.strip_prefix("window:")?.parse::<u64>().ok()
 }
 
 fn command_basename(command: &str) -> Option<&str> {

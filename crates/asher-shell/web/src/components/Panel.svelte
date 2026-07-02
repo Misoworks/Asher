@@ -33,13 +33,13 @@
     }
   });
 
-  function launch(command: string) {
-    const windowId = windowIdFromCommand(command);
+  function launch(app: PanelApp) {
+    const windowId = nextWindowId(app);
     if (windowId !== undefined) {
       sendAction({ type: "window-activate", window: windowId });
       return;
     }
-    sendAction({ type: "panel-launch", command });
+    sendAction({ type: "panel-launch", command: app.command });
   }
 
   function openMenu(command: string, x: number) {
@@ -82,6 +82,18 @@
     if (!command.startsWith("window:")) return undefined;
     const id = Number(command.slice("window:".length));
     return Number.isFinite(id) ? id : undefined;
+  }
+
+  function nextWindowId(app: PanelApp) {
+    const ids = app.windowIds.length > 0 ? app.windowIds : app.windowId !== undefined ? [app.windowId] : [];
+    if (ids.length === 0) return windowIdFromCommand(app.command);
+    const visible = ids.find((id) => snapshot.windows.some((window) => window.id === id && window.visible));
+    const active = app.activeWindowId ?? ids.find((id) => snapshot.windows.some((window) => window.id === id && window.active));
+    if (app.active && active !== undefined && ids.length > 1) {
+      const index = ids.indexOf(active);
+      return ids[(index + 1) % ids.length];
+    }
+    return active ?? visible ?? ids[0];
   }
 </script>
 

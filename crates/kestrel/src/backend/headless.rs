@@ -61,12 +61,7 @@ pub fn run(options: HeadlessOptions) -> Result<(), HeadlessError> {
         display.flush_clients()?;
 
         let frame_time = frame_clock.next_frame();
-        for surface in state
-            .windows
-            .surfaces()
-            .into_iter()
-            .chain(state.layer_surfaces())
-        {
+        for surface in state.frame_callback_surfaces() {
             send_surface_frame_tree(state.output(), &surface, frame_time);
         }
 

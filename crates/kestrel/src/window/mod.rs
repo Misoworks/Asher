@@ -1,7 +1,9 @@
 use crate::window_animation::{WindowAnimation, WindowTransform};
+mod geometry;
 mod hit;
 mod ops;
 mod stack;
+mod stack_hit;
 use asher_ipc::{Rect, WindowId, WindowState, WorkspaceId};
 pub use hit::{ResizeEdge, WindowFrameControl, WindowFrameHit};
 pub use ops::WindowGrab;

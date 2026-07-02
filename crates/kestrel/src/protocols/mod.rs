@@ -1,9 +1,4 @@
-use crate::{
-    client::ClientState,
-    render::handle_commit,
-    state::KestrelState,
-    window::{ResizeEdge, surface_has_client_frame_extents},
-};
+use crate::{client::ClientState, render::handle_commit, state::KestrelState};
 use smithay::{
     backend::allocator::Buffer,
     delegate_alpha_modifier, delegate_compositor, delegate_cursor_shape, delegate_data_device,
@@ -11,26 +6,21 @@ use smithay::{
     delegate_presentation, delegate_primary_selection, delegate_seat, delegate_shm,
     delegate_text_input_manager, delegate_viewporter, delegate_xdg_activation,
     delegate_xdg_decoration, delegate_xdg_shell, delegate_xdg_toplevel_icon,
-    desktop::{PopupKeyboardGrab, PopupKind, PopupPointerGrab},
+    desktop::PopupKind,
     input::{
         Seat, SeatHandler,
         keyboard::LedState,
-        pointer::{CursorIcon, CursorImageStatus, Focus},
+        pointer::{CursorIcon, CursorImageStatus},
     },
     output::Output,
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::{
-            Client, Resource,
-            protocol::{wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
-        },
+    reexports::wayland_server::{
+        Client, Resource,
+        protocol::{wl_buffer, wl_output::WlOutput, wl_surface::WlSurface},
     },
-    utils::{Serial, Transform},
     wayland::{
         buffer::BufferHandler,
-        compositor::{self, CompositorClientState, CompositorHandler, CompositorState},
+        compositor::{CompositorClientState, CompositorHandler, CompositorState},
         dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
-        fractional_scale::{self, FractionalScaleHandler},
         output::OutputHandler,
         selection::{
             SelectionHandler,
@@ -43,17 +33,12 @@ use smithay::{
             },
         },
         shell::wlr_layer::{Layer, LayerSurface, WlrLayerShellHandler, WlrLayerShellState},
-        shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            decoration::XdgDecorationHandler,
-        },
+        shell::xdg::PopupSurface,
         shm::{ShmHandler, ShmState},
         tablet_manager::TabletSeatHandler,
         xdg_activation::{
-            XdgActivationHandler, XdgActivationState, XdgActivationToken,
-            XdgActivationTokenData,
+            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
-        xdg_toplevel_icon::XdgToplevelIconHandler,
     },
 };
 #[cfg(feature = "session-backend")]
@@ -61,13 +46,16 @@ use smithay::{
     backend::renderer::sync::Fence,
     delegate_drm_syncobj,
     wayland::{
+        compositor,
         compositor::{BufferAssignment, SurfaceAttributes},
         drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState},
     },
 };
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use std::os::unix::io::OwnedFd;
 use tracing::debug;
+
+mod xdg;
+use self::xdg::configure_existing_popup;
 
 impl BufferHandler for KestrelState {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
@@ -99,169 +87,6 @@ impl DrmSyncobjHandler for KestrelState {
     }
 }
 
-impl XdgShellHandler for KestrelState {
-    fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.xdg_shell_state
-    }
-
-    fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        surface.with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Activated);
-        });
-        self.map_toplevel(surface.clone());
-        if let Some(keyboard) = self.keyboard.clone() {
-            self.activate_surface(&keyboard, &surface);
-        }
-        surface.send_configure();
-        debug!("mapped xdg toplevel");
-    }
-
-    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
-        self.enter_output(surface.wl_surface());
-        configure_popup(&surface, positioner);
-        let _ = self
-            .popup_manager
-            .track_popup(PopupKind::from(surface.clone()));
-        let _ = surface.send_configure();
-        self.mark_scene_dirty();
-    }
-
-    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
-        if !self.client_grab_allowed(&surface, serial) {
-            debug!("ignored stale xdg toplevel move request");
-            return;
-        }
-        if let Some(keyboard) = self.keyboard.clone() {
-            self.activate_surface(&keyboard, &surface);
-        }
-        self.begin_client_drag(surface);
-    }
-
-    fn resize_request(
-        &mut self,
-        surface: ToplevelSurface,
-        _seat: wl_seat::WlSeat,
-        serial: Serial,
-        edges: xdg_toplevel::ResizeEdge,
-    ) {
-        let Some(edge) = resize_edge_from_xdg(edges) else {
-            return;
-        };
-        if !self.client_grab_allowed(&surface, serial) {
-            debug!("ignored stale xdg toplevel resize request");
-            return;
-        }
-
-        if let Some(keyboard) = self.keyboard.clone() {
-            self.activate_surface(&keyboard, &surface);
-        }
-        self.begin_client_resize(surface, edge);
-    }
-
-    fn grab(&mut self, surface: PopupSurface, _seat: wl_seat::WlSeat, serial: Serial) {
-        let popup = PopupKind::from(surface);
-        let Ok(root) = smithay::desktop::find_popup_root_surface(&popup) else {
-            return;
-        };
-        let seat = self.seat.clone();
-        let Ok(grab) = self
-            .popup_manager
-            .grab_popup::<Self>(root, popup, &seat, serial)
-        else {
-            return;
-        };
-
-        if let Some(keyboard) = seat.get_keyboard() {
-            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
-        }
-        if let Some(pointer) = seat.get_pointer() {
-            pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
-        }
-    }
-
-    fn reposition_request(
-        &mut self,
-        surface: PopupSurface,
-        positioner: PositionerState,
-        token: u32,
-    ) {
-        configure_popup(&surface, positioner);
-        let _ = surface.send_repositioned(token);
-        self.mark_scene_dirty();
-    }
-
-    fn popup_destroyed(&mut self, surface: PopupSurface) {
-        self.leave_output(surface.wl_surface());
-        self.mark_scene_dirty();
-    }
-
-    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        self.unmap_toplevel(&surface);
-        debug!("unmapped xdg toplevel");
-    }
-
-    fn maximize_request(&mut self, surface: ToplevelSurface) {
-        let Some(id) = self.windows.id_for_surface(&surface) else {
-            surface.send_configure();
-            return;
-        };
-
-        let _ = self.maximize_window(id);
-    }
-
-    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        let Some(id) = self.windows.id_for_surface(&surface) else {
-            surface.send_configure();
-            return;
-        };
-
-        let _ = self.unmaximize_window(id);
-    }
-
-    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
-        let Some(id) = self.windows.id_for_surface(&surface) else {
-            surface.send_configure();
-            return;
-        };
-
-        let _ = self.fullscreen_window(id);
-    }
-
-    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        let Some(id) = self.windows.id_for_surface(&surface) else {
-            surface.send_configure();
-            return;
-        };
-
-        let _ = self.unfullscreen_window(id);
-    }
-
-    fn minimize_request(&mut self, surface: ToplevelSurface) {
-        let Some(keyboard) = self.keyboard.clone() else {
-            return;
-        };
-        let Some(id) = self.windows.id_for_surface(&surface) else {
-            return;
-        };
-
-        let _ = self.minimize_window(&keyboard, id);
-    }
-}
-
-impl XdgDecorationHandler for KestrelState {
-    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        self.set_decoration_mode(&toplevel, Mode::ClientSide);
-    }
-
-    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: Mode) {
-        self.set_decoration_mode(&toplevel, mode);
-    }
-
-    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        self.set_decoration_mode(&toplevel, Mode::ClientSide);
-    }
-}
-
 impl XdgActivationHandler for KestrelState {
     fn activation_state(&mut self) -> &mut XdgActivationState {
         &mut self.protocol_state.xdg_activation
@@ -289,135 +114,7 @@ impl XdgActivationHandler for KestrelState {
     }
 }
 
-fn resize_edge_from_xdg(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdge> {
-    use xdg_toplevel::ResizeEdge as XdgResizeEdge;
-
-    match edge {
-        XdgResizeEdge::None => None,
-        XdgResizeEdge::Top => Some(ResizeEdge {
-            left: false,
-            right: false,
-            top: true,
-            bottom: false,
-        }),
-        XdgResizeEdge::Bottom => Some(ResizeEdge {
-            left: false,
-            right: false,
-            top: false,
-            bottom: true,
-        }),
-        XdgResizeEdge::Left => Some(ResizeEdge {
-            left: true,
-            right: false,
-            top: false,
-            bottom: false,
-        }),
-        XdgResizeEdge::TopLeft => Some(ResizeEdge {
-            left: true,
-            right: false,
-            top: true,
-            bottom: false,
-        }),
-        XdgResizeEdge::BottomLeft => Some(ResizeEdge {
-            left: true,
-            right: false,
-            top: false,
-            bottom: true,
-        }),
-        XdgResizeEdge::Right => Some(ResizeEdge {
-            left: false,
-            right: true,
-            top: false,
-            bottom: false,
-        }),
-        XdgResizeEdge::TopRight => Some(ResizeEdge {
-            left: false,
-            right: true,
-            top: true,
-            bottom: false,
-        }),
-        XdgResizeEdge::BottomRight => Some(ResizeEdge {
-            left: false,
-            right: true,
-            top: false,
-            bottom: true,
-        }),
-        _ => None,
-    }
-}
-
-fn configure_popup(surface: &PopupSurface, positioner: PositionerState) {
-    surface.with_pending_state(|state| {
-        state.positioner = positioner;
-        state.geometry = positioner.get_geometry();
-    });
-}
-
-impl KestrelState {
-    pub(crate) fn update_surface_scale(&self, surface: &WlSurface) {
-        let scale = self.output().current_scale();
-        let integer_scale = scale.integer_scale().max(1);
-        let fractional_scale = scale.fractional_scale();
-
-        compositor::with_states(surface, |states| {
-            compositor::send_surface_state(surface, states, integer_scale, Transform::Normal);
-            fractional_scale::with_fractional_scale(states, |state| {
-                state.set_preferred_scale(fractional_scale);
-            });
-        });
-    }
-
-    fn set_decoration_mode(&mut self, toplevel: &ToplevelSurface, mode: Mode) {
-        let requested_server_decoration = mode == Mode::ServerSide;
-        let advertised_mode =
-            if requested_server_decoration && surface_has_client_frame_extents(toplevel) {
-                Mode::ClientSide
-            } else {
-                mode
-            };
-        toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(advertised_mode);
-        });
-
-        if let Some(change) = self
-            .windows
-            .set_requested_server_decoration(toplevel, requested_server_decoration)
-        {
-            let _ = self.layout.set_window_geometry(change.id, change.geometry);
-            self.apply_active_arrangement();
-        } else {
-            toplevel.send_configure();
-            self.mark_scene_dirty();
-        }
-    }
-
-    fn reconcile_decoration_after_commit(&mut self, surface: &WlSurface) -> bool {
-        let Some((toplevel, change)) = self.windows.refresh_decoration_for_root_surface(surface)
-        else {
-            return false;
-        };
-
-        let mode = if change.server_decorated {
-            Mode::ServerSide
-        } else {
-            Mode::ClientSide
-        };
-        toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(mode);
-        });
-        let _ = self.layout.set_window_geometry(change.id, change.geometry);
-        self.apply_active_arrangement();
-        true
-    }
-}
-
-impl FractionalScaleHandler for KestrelState {
-    fn new_fractional_scale(&mut self, surface: WlSurface) {
-        self.update_surface_scale(&surface);
-    }
-}
-
-impl XdgToplevelIconHandler for KestrelState {}
+impl KestrelState {}
 
 impl WlrLayerShellHandler for KestrelState {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -438,6 +135,7 @@ impl WlrLayerShellHandler for KestrelState {
 
     fn new_popup(&mut self, _parent: LayerSurface, popup: PopupSurface) {
         self.enter_output(popup.wl_surface());
+        configure_existing_popup(&popup, self.popup_constraint_for(&popup));
         let _ = self
             .popup_manager
             .track_popup(PopupKind::from(popup.clone()));
@@ -602,7 +300,11 @@ fn queue_syncobj_acquire(state: &mut KestrelState, surface: &WlSurface) {
         }
 
         let mut syncobj = states.cached_state.get::<DrmSyncobjCachedState>();
-        syncobj.pending().acquire_point.clone()
+        let pending = syncobj.pending();
+        pending
+            .release_point
+            .as_ref()
+            .and_then(|_| pending.acquire_point.clone())
     });
 
     let Some(acquire) = acquire else {

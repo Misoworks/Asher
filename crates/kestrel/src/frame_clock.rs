@@ -41,12 +41,27 @@ impl FrameClock {
     }
 
     pub fn next_frame(&mut self) -> FrameTime {
+        self.frame_at(self.clock.now())
+    }
+
+    pub fn frame_at(&mut self, time: Time<Monotonic>) -> FrameTime {
         let frame = FrameTime {
-            time: self.clock.now(),
+            time,
             refresh: self.refresh,
             sequence: self.sequence,
         };
         self.sequence = self.sequence.wrapping_add(1).max(1);
+        frame
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub fn frame_at_sequence(&mut self, time: Time<Monotonic>, sequence: u64) -> FrameTime {
+        let frame = FrameTime {
+            time,
+            refresh: self.refresh,
+            sequence,
+        };
+        self.sequence = sequence.wrapping_add(1).max(1);
         frame
     }
 }

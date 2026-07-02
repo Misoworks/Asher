@@ -103,6 +103,8 @@ pub struct WebPanelApp {
     pub active: bool,
     pub pinned: bool,
     pub window_id: Option<u64>,
+    pub window_ids: Vec<u64>,
+    pub active_window_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

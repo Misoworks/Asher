@@ -64,6 +64,8 @@ export type PanelApp = {
   active: boolean;
   pinned: boolean;
   windowId?: number;
+  windowIds: number[];
+  activeWindowId?: number;
 };
 
 export type ApplicationItem = {

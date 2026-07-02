@@ -6,6 +6,7 @@
   const app = $derived(snapshot.panelApps.find((entry) => entry.command === snapshot.panelMenuCommand));
   const window = $derived(app ? matchedWindow(app, snapshot.windows) : undefined);
   const isRunning = $derived(Boolean(window ?? app?.running));
+  const canLaunch = $derived(Boolean(app && launchable(app)));
 
   function close() {
     sendAction({ type: "panel-menu-close" });
@@ -27,6 +28,11 @@
     sendAction({ type: "panel-unpin", command: app.command });
   }
 
+  function pin(app: PanelApp) {
+    close();
+    sendAction({ type: "panel-pin", label: app.label, command: app.command });
+  }
+
   function minimize(window: WindowItem) {
     close();
     sendAction({ type: "window-minimize", window: window.id });
@@ -44,6 +50,9 @@
 
   function matchedWindow(app: PanelApp, windows: WindowItem[]) {
     return (
+      windows.find((window) => window.active && app.windowIds.includes(window.id)) ??
+      windows.find((window) => window.visible && app.windowIds.includes(window.id)) ??
+      windows.find((window) => app.windowIds.includes(window.id)) ??
       windows.find((window) => window.active && window.visible && windowMatchesApp(window, app)) ??
       windows.find((window) => window.visible && windowMatchesApp(window, app)) ??
       windows.find((window) => windowMatchesApp(window, app))
@@ -51,6 +60,7 @@
   }
 
   function windowMatchesApp(window: WindowItem, app: PanelApp) {
+    if (app.windowIds.includes(window.id)) return true;
     if (app.windowId === window.id) return true;
     const command = commandName(app.command);
     const label = app.label.toLowerCase();
@@ -62,6 +72,10 @@
 
   function commandName(command: string) {
     return command.trim().split(/\s+/)[0]?.split("/").at(-1)?.replace(/^['"]|['"]$/g, "").toLowerCase() ?? "";
+  }
+
+  function launchable(app: PanelApp) {
+    return !app.command.startsWith("window:") && !app.command.startsWith("window-group:");
   }
 </script>
 
@@ -75,7 +89,7 @@
             <span>Focus</span>
           </button>
         {/if}
-        {#if app.pinned}
+        {#if app.pinned || canLaunch}
           <button type="button" class="panel-menu-item" role="menuitem" onclick={() => open(app, true)}>
             <span>Open New Window</span>
           </button>
@@ -90,9 +104,11 @@
           <span>Force Quit</span>
         </button>
       {:else if isRunning}
-        <button type="button" class="panel-menu-item" role="menuitem" onclick={() => open(app, true)}>
-          <span>Open New Window</span>
-        </button>
+        {#if canLaunch}
+          <button type="button" class="panel-menu-item" role="menuitem" onclick={() => open(app, true)}>
+            <span>Open New Window</span>
+          </button>
+        {/if}
         <button type="button" class="panel-menu-item is-danger" role="menuitem" onclick={() => forceQuit(app)}>
           <span>Force Quit</span>
         </button>
@@ -104,6 +120,10 @@
       {#if app.pinned}
         <button type="button" class="panel-menu-item" role="menuitem" onclick={() => unpin(app)}>
           <span>Unpin from Panel</span>
+        </button>
+      {:else if canLaunch}
+        <button type="button" class="panel-menu-item" role="menuitem" onclick={() => pin(app)}>
+          <span>Pin to Panel</span>
         </button>
       {/if}
     </div>
