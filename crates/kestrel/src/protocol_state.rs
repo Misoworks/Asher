@@ -1,6 +1,6 @@
 use crate::{background_effect::BackgroundEffectGlobal, state::KestrelState};
 #[cfg(feature = "session-backend")]
-use smithay::wayland::dmabuf::DmabufGlobal;
+use smithay::wayland::{dmabuf::DmabufGlobal, drm_syncobj::DrmSyncobjState};
 use smithay::{
     reexports::wayland_server::DisplayHandle,
     utils::{Clock, Monotonic},
@@ -19,6 +19,8 @@ pub struct ProtocolState {
     pub dmabuf: DmabufState,
     #[cfg(feature = "session-backend")]
     pub dmabuf_global: Option<DmabufGlobal>,
+    #[cfg(feature = "session-backend")]
+    pub drm_syncobj: Option<DrmSyncobjState>,
     _xdg_decoration: XdgDecorationState,
     _cursor_shape: CursorShapeManagerState,
     _fractional_scale: FractionalScaleManagerState,
@@ -43,6 +45,8 @@ impl ProtocolState {
             dmabuf: DmabufState::new(),
             #[cfg(feature = "session-backend")]
             dmabuf_global: None,
+            #[cfg(feature = "session-backend")]
+            drm_syncobj: None,
             _xdg_decoration: XdgDecorationState::new::<KestrelState>(display),
             _cursor_shape: CursorShapeManagerState::new::<KestrelState>(display),
             _fractional_scale: FractionalScaleManagerState::new::<KestrelState>(display),

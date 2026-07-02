@@ -20,7 +20,7 @@ use smithay::{
     reexports::{
         calloop::EventLoop,
         drm::control::crtc,
-        wayland_server::{Display, ListeningSocket},
+        wayland_server::{Client, Display, ListeningSocket},
     },
 };
 use std::{sync::Arc, time::Duration};
@@ -42,7 +42,11 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         input,
     } = opened.sources;
     let mut state = KestrelState::new_for_outputs(&dh, options.config, device.descriptors());
-    state.enable_dmabuf(device.renderer.dmabuf_formats());
+    state.enable_dmabuf(
+        device.dmabuf_main_device(),
+        device.renderer.dmabuf_formats(),
+    );
+    state.enable_drm_syncobj(device.drm_device_fd());
     let ipc = IpcServer::bind()
         .map_err(|error| DrmError::Unsupported(format!("failed to bind IPC socket: {error}")))?;
     let shell_control_socket = shell_socket_path(ipc.path());
@@ -138,6 +142,7 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             &mut active,
             &mut force_full_damage,
         )?;
+        release_syncobj_blockers(&mut loop_events, &mut state, &dh);
         for event in loop_events.udev.drain(..) {
             if !device.handles_udev_event(&event) {
                 continue;
@@ -231,6 +236,7 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
         display
             .dispatch_clients(&mut state)
             .map_err(|error| DrmError::Unsupported(format!("Wayland dispatch failed: {error}")))?;
+        register_syncobj_sources(&mut state, &event_loop)?;
         display
             .flush_clients()
             .map_err(|error| DrmError::Unsupported(format!("Wayland flush failed: {error}")))?;
@@ -238,7 +244,7 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             device.sync_cursor(&mut state);
         }
 
-        if active && !device.direct_scanout_pending() {
+        if active && !device.frame_pending() {
             let frame_result = {
                 let (renderer, output) = device.renderer_and_primary_output();
                 let frame_result = frame_renderer.render(
@@ -291,9 +297,7 @@ pub fn run(options: DrmOptions) -> Result<(), DrmError> {
             event_loop
                 .dispatch(Some(IDLE_DISPATCH), &mut loop_events)
                 .map_err(|error| {
-                    DrmError::Unsupported(format!(
-                        "session direct-scanout dispatch failed: {error}"
-                    ))
+                    DrmError::Unsupported(format!("session frame-pending dispatch failed: {error}"))
                 })?;
         } else {
             event_loop
@@ -312,6 +316,43 @@ struct LoopEvents {
     drm_errors: Vec<String>,
     session: Vec<SessionEvent>,
     udev: Vec<UdevEvent>,
+    syncobj_ready: Vec<Client>,
+}
+
+fn release_syncobj_blockers(
+    events: &mut LoopEvents,
+    state: &mut KestrelState,
+    dh: &smithay::reexports::wayland_server::DisplayHandle,
+) {
+    for client in events.syncobj_ready.drain(..) {
+        let Some(client_state) = client.get_data::<ClientState>() else {
+            continue;
+        };
+        client_state.compositor_state.blocker_cleared(state, dh);
+        state.mark_scene_dirty();
+    }
+}
+
+fn register_syncobj_sources(
+    state: &mut KestrelState,
+    event_loop: &EventLoop<LoopEvents>,
+) -> Result<(), DrmError> {
+    for pending in state.take_syncobj_sources() {
+        let client = pending.client;
+        event_loop
+            .handle()
+            .insert_source(pending.source, move |(), _, events| {
+                events.syncobj_ready.push(client.clone());
+                Ok(())
+            })
+            .map_err(|error| {
+                DrmError::Unsupported(format!(
+                    "failed to register drm syncobj acquire source: {error}"
+                ))
+            })?;
+    }
+
+    Ok(())
 }
 
 fn register_keyboard_device(

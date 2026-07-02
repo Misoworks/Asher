@@ -179,7 +179,7 @@ pub enum ConfigError {
     Read { path: PathBuf, source: io::Error },
     #[error("failed to write {path}")]
     Write { path: PathBuf, source: io::Error },
-    #[error("failed to parse config TOML")]
+    #[error("failed to parse config TOML: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("failed to serialize config TOML")]
     Serialize(toml::ser::Error),

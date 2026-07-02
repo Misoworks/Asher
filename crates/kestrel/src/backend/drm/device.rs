@@ -234,10 +234,16 @@ impl SessionDevice {
         &self.outputs[self.primary]
     }
 
-    pub fn direct_scanout_pending(&self) -> bool {
-        self.outputs
-            .iter()
-            .any(SessionOutput::direct_scanout_pending)
+    pub fn drm_device_fd(&self) -> DrmDeviceFd {
+        self.drm.device_fd().clone()
+    }
+
+    pub fn dmabuf_main_device(&self) -> u64 {
+        self.active_device_id
+    }
+
+    pub fn frame_pending(&self) -> bool {
+        self.outputs.iter().any(SessionOutput::has_pending_frame)
     }
 
     pub fn discard_pending_frame(&mut self) {
@@ -303,10 +309,6 @@ impl SessionOutput {
 
     pub fn has_pending_frame(&self) -> bool {
         self.submitted_frame.is_some() || self.direct_scanout.has_pending_frame()
-    }
-
-    fn direct_scanout_pending(&self) -> bool {
-        self.direct_scanout.has_pending_frame()
     }
 
     fn discard_pending_frame(&mut self) {

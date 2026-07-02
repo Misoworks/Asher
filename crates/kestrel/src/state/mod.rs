@@ -34,6 +34,12 @@ use smithay::{
         shm::ShmState,
     },
 };
+#[cfg(feature = "session-backend")]
+use smithay::{
+    backend::drm::DrmDeviceFd,
+    reexports::wayland_server::Client,
+    wayland::drm_syncobj::{DrmSyncPointSource, DrmSyncobjState, supports_syncobj_eventfd},
+};
 use std::{cell::RefCell, path::PathBuf};
 use tracing::debug;
 
@@ -73,6 +79,8 @@ pub struct KestrelState {
     pub xwayland_display: Option<String>,
     pub titlebar_cache: RefCell<TitlebarCache>,
     pub dmabuf_formats: FormatSet,
+    #[cfg(feature = "session-backend")]
+    pending_syncobj_sources: Vec<PendingSyncobjSource>,
     pending_keyboard_led_state: Option<LedState>,
     scene_dirty: bool,
     workspace_transition: Option<WorkspaceTransition>,
@@ -144,6 +152,8 @@ impl KestrelState {
             xwayland_display: None,
             titlebar_cache: RefCell::new(TitlebarCache::default()),
             dmabuf_formats: FormatSet::default(),
+            #[cfg(feature = "session-backend")]
+            pending_syncobj_sources: Vec::new(),
             pending_keyboard_led_state: None,
             scene_dirty: true,
             workspace_transition: None,
@@ -172,8 +182,9 @@ impl KestrelState {
     }
 
     #[cfg(feature = "session-backend")]
-    pub fn enable_dmabuf(&mut self, formats: FormatSet) {
+    pub fn enable_dmabuf(&mut self, main_device: u64, formats: FormatSet) {
         use smithay::backend::allocator::Format;
+        use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
 
         if self.protocol_state.dmabuf_global.is_some() {
             return;
@@ -184,12 +195,52 @@ impl KestrelState {
             return;
         }
 
-        let global = self
-            .protocol_state
-            .dmabuf
-            .create_global::<Self>(&self.display_handle, advertised_formats);
+        let global = match DmabufFeedbackBuilder::new(main_device as _, advertised_formats.clone())
+            .build()
+        {
+            Ok(feedback) => self
+                .protocol_state
+                .dmabuf
+                .create_global_with_default_feedback::<Self>(&self.display_handle, &feedback),
+            Err(error) => {
+                tracing::warn!(%error, "failed to build dmabuf feedback; falling back to v3 dmabuf");
+                self.protocol_state
+                    .dmabuf
+                    .create_global::<Self>(&self.display_handle, advertised_formats)
+            }
+        };
         self.protocol_state.dmabuf_global = Some(global);
         self.dmabuf_formats = formats;
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub fn enable_drm_syncobj(&mut self, import_device: DrmDeviceFd) {
+        if let Some(syncobj) = self.protocol_state.drm_syncobj.as_mut() {
+            syncobj.update_device(import_device);
+            return;
+        }
+
+        if !supports_syncobj_eventfd(&import_device) {
+            debug!("DRM device does not support syncobj eventfd; explicit sync disabled");
+            return;
+        }
+
+        self.protocol_state.drm_syncobj = Some(DrmSyncobjState::new::<Self>(
+            &self.display_handle,
+            import_device,
+        ));
+        debug!("enabled linux-drm-syncobj explicit sync");
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub(crate) fn queue_syncobj_source(&mut self, client: Client, source: DrmSyncPointSource) {
+        self.pending_syncobj_sources
+            .push(PendingSyncobjSource { client, source });
+    }
+
+    #[cfg(feature = "session-backend")]
+    pub(crate) fn take_syncobj_sources(&mut self) -> Vec<PendingSyncobjSource> {
+        std::mem::take(&mut self.pending_syncobj_sources)
     }
 
     pub fn map_toplevel(&mut self, surface: ToplevelSurface) {
@@ -555,4 +606,10 @@ pub struct ClientGrabSerial {
 pub struct PendingWindowDrag {
     pub surface: ToplevelSurface,
     pub pointer_start: Point<f64, Logical>,
+}
+
+#[cfg(feature = "session-backend")]
+pub(crate) struct PendingSyncobjSource {
+    pub client: Client,
+    pub source: DrmSyncPointSource,
 }

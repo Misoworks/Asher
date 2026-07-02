@@ -56,6 +56,15 @@ use smithay::{
         xdg_toplevel_icon::XdgToplevelIconHandler,
     },
 };
+#[cfg(feature = "session-backend")]
+use smithay::{
+    backend::renderer::sync::Fence,
+    delegate_drm_syncobj,
+    wayland::{
+        compositor::{BufferAssignment, SurfaceAttributes},
+        drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState},
+    },
+};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use std::os::unix::io::OwnedFd;
 use tracing::debug;
@@ -83,6 +92,13 @@ impl DmabufHandler for KestrelState {
     }
 }
 
+#[cfg(feature = "session-backend")]
+impl DrmSyncobjHandler for KestrelState {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.protocol_state.drm_syncobj.as_mut()
+    }
+}
+
 impl XdgShellHandler for KestrelState {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
@@ -100,8 +116,9 @@ impl XdgShellHandler for KestrelState {
         debug!("mapped xdg toplevel");
     }
 
-    fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
         self.enter_output(surface.wl_surface());
+        configure_popup(&surface, positioner);
         let _ = self
             .popup_manager
             .track_popup(PopupKind::from(surface.clone()));
@@ -165,9 +182,10 @@ impl XdgShellHandler for KestrelState {
     fn reposition_request(
         &mut self,
         surface: PopupSurface,
-        _positioner: PositionerState,
+        positioner: PositionerState,
         token: u32,
     ) {
+        configure_popup(&surface, positioner);
         let _ = surface.send_repositioned(token);
         self.mark_scene_dirty();
     }
@@ -328,6 +346,13 @@ fn resize_edge_from_xdg(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdge> {
     }
 }
 
+fn configure_popup(surface: &PopupSurface, positioner: PositionerState) {
+    surface.with_pending_state(|state| {
+        state.positioner = positioner;
+        state.geometry = positioner.get_geometry();
+    });
+}
+
 impl KestrelState {
     pub(crate) fn update_surface_scale(&self, surface: &WlSurface) {
         let scale = self.output().current_scale();
@@ -466,6 +491,8 @@ impl CompositorHandler for KestrelState {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         self.update_surface_scale(surface);
+        #[cfg(feature = "session-backend")]
+        install_syncobj_pre_commit_hook(surface);
         self.mark_scene_dirty();
     }
 
@@ -549,3 +576,49 @@ delegate_seat!(KestrelState);
 delegate_data_device!(KestrelState);
 delegate_primary_selection!(KestrelState);
 delegate_alpha_modifier!(KestrelState);
+#[cfg(feature = "session-backend")]
+delegate_drm_syncobj!(KestrelState);
+
+#[cfg(feature = "session-backend")]
+fn install_syncobj_pre_commit_hook(surface: &WlSurface) {
+    compositor::add_pre_commit_hook::<KestrelState, _>(surface, |state, _dh, surface| {
+        queue_syncobj_acquire(state, surface);
+    });
+}
+
+#[cfg(feature = "session-backend")]
+fn queue_syncobj_acquire(state: &mut KestrelState, surface: &WlSurface) {
+    let Some(client) = surface.client() else {
+        return;
+    };
+
+    let acquire = compositor::with_states(surface, |states| {
+        let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+        if !matches!(
+            attributes.pending().buffer,
+            Some(BufferAssignment::NewBuffer(_))
+        ) {
+            return None;
+        }
+
+        let mut syncobj = states.cached_state.get::<DrmSyncobjCachedState>();
+        syncobj.pending().acquire_point.clone()
+    });
+
+    let Some(acquire) = acquire else {
+        return;
+    };
+    if acquire.is_signaled() {
+        return;
+    }
+
+    match acquire.generate_blocker() {
+        Ok((blocker, source)) => {
+            compositor::add_blocker(surface, blocker);
+            state.queue_syncobj_source(client, source);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to create drm syncobj acquire blocker");
+        }
+    }
+}
